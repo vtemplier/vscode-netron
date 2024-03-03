@@ -1,0 +1,19 @@
+# vscode
+.vscode/**
+.vscode-test/**
+
+# compiled: unused
+out/test/**
+
+# source: unused
+src/**
+.gitignore
+**/tsconfig.json
+**/.eslintrc.json
+**/*.map
+**/*.ts
+tool/**
+
+# lock
+package-lock.json
+yarn.lock
