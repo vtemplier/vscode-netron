@@ -1,0 +1,141 @@
+[
+  {
+    "name": "Convolutional:v3",
+    "category": "Layer"
+  },
+  {
+    "name": "Deconvolution:v3",
+    "category": "Layer"
+  },
+  {
+    "name": "BatchNorm:v3",
+    "category": "Normalization"
+  },
+  {
+    "name": "Concat:v3",
+    "category": "Tensor"
+  },
+  {
+    "name": "Gather:v3",
+    "category": "Transform"
+  },
+  {
+    "name": "FullyConnected:v3",
+    "category": "Layer"
+  },
+  {
+    "name": "Neuron:v3",
+    "category": "Activation",
+    "attributes": [
+      { "name": "type", "type": "Activation" }
+    ]
+  },
+  {
+    "name": "Reshape:v3",
+    "category": "Shape"
+  },
+  {
+    "name": "Permute:v3",
+    "category": "Shape"
+  },
+  {
+    "name": "Pooling:v3",
+    "category": "Pool"
+  },
+  {
+    "name": "SoftMax:v3",
+    "category": "Activation"
+  },
+  {
+    "name": "StridedSlice:v3",
+    "category": "Tensor"
+  },
+  {
+    "name": "Slice:v3",
+    "category": "Tensor"
+  },
+  {
+    "name": "Pool:v4",
+    "category": "Pool"
+  },
+  {
+    "name": "Softmax:v4",
+    "category": "Activation"
+  },
+  {
+    "name": "Sigmoid:v4",
+    "category": "Activation"
+  },
+  {
+    "name": "Conv2d:v4",
+    "category": "Layer",
+    "inputs": [
+      { "name": "input" },
+      { "name": "weight" },
+      { "name": "bias" }
+    ]
+  },
+  {
+    "name": "DepthWiseConv2d:v4",
+    "category": "Layer",
+    "inputs": [
+      { "name": "input" },
+      { "name": "weight" },
+      { "name": "bias" }
+    ]
+  },
+  {
+    "name": "FullyConnected:v4",
+    "category": "Layer",
+    "inputs": [
+      { "name": "input" },
+      { "name": "weight" },
+      { "name": "bias" }
+    ]
+  },
+  {
+    "name": "Concat:v4",
+    "category": "Tensor"
+  },
+  {
+    "name": "Split:v4",
+    "category": "Tensor"
+  },
+  {
+    "name": "Reshape:v4",
+    "category": "Shape"
+  },
+  {
+    "name": "Neuron:v4",
+    "category": "Activation"
+  },
+  {
+    "name": "Transpose:v4",
+    "category": "Transform"
+  },
+  {
+    "name": "StridedSlice:v4",
+    "category": "Tensor"
+  },
+  {
+    "name": "Pad:v4",
+    "category": "Shape"
+  },
+  {
+    "name": "Gather:v4",
+    "category": "Transform",
+    "inputs": [
+      { "name": "input" },
+      { "name": "indices" }
+    ]
+  },
+  {
+    "name": "Batchnorm:v4",
+    "category": "Normalization",
+    "inputs": [
+      { "name": "input" },
+      { "name": "mean" },
+      { "name": "variance" }
+    ]
+  }
+]
