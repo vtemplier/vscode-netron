@@ -551,6 +551,8 @@ function getHtmlForWebview(context: vscode.ExtensionContext, webview: vscode.Web
 	<script type="module" nonce="${nonce}">
 		import {BrowserHost} from "${browserUri}";
 		import {View} from "${viewUri}";
+
+		const vscode = acquireVsCodeApi();
 		
 		var host = new BrowserHost();
 		window.__view__ = new View(host);
@@ -569,12 +571,24 @@ function getHtmlForWebview(context: vscode.ExtensionContext, webview: vscode.Web
 		}
 		
 		docReady(function(){
-			var dataBase64 = '%MODEL%';
-			var h = window.__view__._host;
 
-			const arrayBuffer = Uint8Array.from(atob(dataBase64), c => c.charCodeAt(0));
-			const file1 = new File([arrayBuffer], "%GRAPHNAME%", {type: ''});
-			h._open(file1, [file1]);
+			window.__view__._host._view.show('welcome spinner');
+			vscode.postMessage({command: 'send_model'});
+
+			let arrayBufferStream = 0;
+
+			window.addEventListener('message', event => {
+				const message = event.data; // The JSON data our extension sent
+		
+				switch (message.command) {
+					case 'sended_model':
+						arrayBufferStream = Uint8Array.from(message.value);
+						const file1 = new File([arrayBufferStream], "%GRAPHNAME%", {type: ''});
+						window.__view__._host._open(file1, [file1]);
+						break;
+				}
+					
+			});
 		});
 		
 	</script>
@@ -633,10 +647,20 @@ export function activate(context: vscode.ExtensionContext) {
 			// panel.webview.html = html;
 			let html = getHtmlForWebview(context, panel.webview);
 
-			let modelData = Buffer.from(fs.readFileSync(lol!)).toString('base64');
+			let modelData = Buffer.from(fs.readFileSync(lol!));
 			html = html.replace('%GRAPHNAME%', baseName);
-			html = html.replace('%MODEL%', modelData);
 			panel.webview.html = html;
+
+			panel.webview.onDidReceiveMessage(
+				message => {
+				  switch (message.command) {
+					case 'send_model':
+						panel.webview.postMessage({command: "sended_model", value: Uint8Array.from(modelData)});
+				  }
+				},
+				undefined,
+				context.subscriptions
+			  );
 		})
 	);
 
