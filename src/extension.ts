@@ -573,17 +573,14 @@ function getHtmlForWebview(context: vscode.ExtensionContext, webview: vscode.Web
 		docReady(function(){
 
 			window.__view__._host._view.show('welcome spinner');
-			vscode.postMessage({command: 'send_model'});
-
-			let arrayBufferStream = 0;
+			vscode.postMessage({command: 'request_model'});
 
 			window.addEventListener('message', event => {
 				const message = event.data; // The JSON data our extension sent
 		
 				switch (message.command) {
-					case 'sended_model':
-						arrayBufferStream = Uint8Array.from(message.value);
-						const file1 = new File([arrayBufferStream], "%GRAPHNAME%", {type: ''});
+					case 'transmit_model':
+						const file1 = new File([Uint8Array.from(message.value)], "%GRAPHNAME%", {type: ''});
 						window.__view__._host._open(file1, [file1]);
 						break;
 				}
@@ -605,12 +602,12 @@ export function activate(context: vscode.ExtensionContext) {
 			const indexPath = vscode.Uri.file(path.join(context.extensionPath, 'webview', 'index.html'));
 			// let html = fs.readFileSync(indexPath.fsPath, 'utf8');
 
-			let lol = vscode.window.activeTextEditor?.document.fileName;
+			let modelFile = vscode.window.activeTextEditor?.document.fileName;
 			if (resource !== undefined)
 			{
-				lol = resource.fsPath;
+				modelFile = resource.fsPath;
 			}
-			let baseName = path.basename(lol!);
+			let baseName = path.basename(modelFile!);
 
 			const panel = vscode.window.createWebviewPanel(
 				'vscode-netron',
@@ -647,15 +644,16 @@ export function activate(context: vscode.ExtensionContext) {
 			// panel.webview.html = html;
 			let html = getHtmlForWebview(context, panel.webview);
 
-			let modelData = Buffer.from(fs.readFileSync(lol!));
 			html = html.replace('%GRAPHNAME%', baseName);
 			panel.webview.html = html;
 
 			panel.webview.onDidReceiveMessage(
 				message => {
 				  switch (message.command) {
-					case 'send_model':
-						panel.webview.postMessage({command: "sended_model", value: Uint8Array.from(modelData)});
+					case 'request_model':
+						panel.webview.postMessage({
+							command: "transmit_model", 
+							value: Uint8Array.from(Buffer.from(fs.readFileSync(modelFile!)))});
 				  }
 				},
 				undefined,
