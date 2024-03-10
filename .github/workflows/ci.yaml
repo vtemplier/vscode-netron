@@ -44,6 +44,7 @@ jobs:
       #   run: npm run test
 
   publish-vsce:
+    needs: [build]
     runs-on: ${{ matrix.os }}
     strategy:
         fail-fast: false
