@@ -63,6 +63,9 @@ jobs:
       - name: Install dependencies
         run: npm install
 
+      - name: Install VSCE
+        run: npm install -g vsce
+
       - name: Check VSCE version
         id: check_vsce
         shell: python
