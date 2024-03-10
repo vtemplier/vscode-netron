@@ -4,18 +4,18 @@
 <meta charset="utf-8">
 <meta name="description" content="Visualizer for neural network, deep learning and machine learning models." />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-<meta http-equiv="Content-Security-Policy" content="default-src cspSource; style-src cspSource 'unsafe-inline'; img-src cspSource https: 'nonce-nonceValue'; script-src cspSource 'nonce-nonceValue'; script-src-elem cspSource 'nonce-nonceValue'; connect-src cspSource https:;">
+<meta http-equiv="Content-Security-Policy" content="default-src %webview_cspSource%; style-src %webview_cspSource% 'unsafe-inline'; img-src %webview_cspSource% https:; script-src %webview_cspSource% 'nonce-%nonce%'; script-src-elem %webview_cspSource% 'nonce-%nonce%'; connect-src %webview_cspSource% https:; frame-src https:;">
 <meta name="version" content="0.0.0">
 <meta name="date" content="">
 <title>Netron</title>
-<link rel="stylesheet" nonce="nonceValue" href="grapherSheetFilePath">
-<link rel="shortcut icon" type="image/x-icon" nonce="nonceValue" href="faviconFilePath">
-<link rel="icon" type="image/png" nonce="nonceValue" href="iconFilePath">
-<link rel="apple-touch-icon" type="image/png" nonce="nonceValue" href="iconFilePath">
-<link rel="apple-touch-icon-precomposed" type="image/png" nonce="nonceValue" href="iconFilePath">
-<link rel="fluid-icon" type="image/png" nonce="nonceValue" href="iconFilePath">
-<script type="module" nonce="nonceValue" src="viewFilePath"></script>
-<script type="module" nonce="nonceValue" src="browserFilePath"></script>
+<link rel="stylesheet" nonce="%nonce%" href="%grapherSheetPath%">
+<link rel="shortcut icon" type="image/x-icon" nonce="%nonce%" href="%faviconPath%">
+<link rel="icon" type="image/png" nonce="%nonce%" href="%iconPath%">
+<link rel="apple-touch-icon" type="image/png" nonce="%nonce%" href="%iconPath%">
+<link rel="apple-touch-icon-precomposed" type="image/png" nonce="%nonce%" href="%iconPath%">
+<link rel="fluid-icon" type="image/png" nonce="%nonce%" href="%iconPath%">
+<script type="module" nonce="%nonce%" src="%viewPath%"></script>
+<script type="module" nonce="%nonce%" src="%browserPath%"></script>
 <style>
 html { touch-action: none; overflow: hidden; width: 100%; height: 100%; -ms-text-size-adjust: 100%; -webkit-text-size-adjust: 100%; text-rendering: optimizeLegibility; -webkit-text-rendering: optimizeLegibility; -moz-text-rendering: optimizeLegibility; -ms-text-rendering: optimizeLegibility; -o-text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; -moz-font-smoothing: antialiased; -ms-font-smoothing: antialiased; -o-font-smoothing: antialiased; }
 body { touch-action: none; overflow: hidden; width: 100%; height: 100%; margin: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "PingFang SC"; font-size: 12px; text-rendering: geometricPrecision; }
@@ -314,7 +314,7 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 	</div>
 </div>
 <div id="logo" class="center logo">
-	<a href="https://github.com/lutzroeder/netron" target="blank_">
+	<a href="https://github.com/vtemplier/vscode-netron" target="blank_">
 		<svg class="center logo-text" viewbox="0 0 5120 1024">
 			<g transform="scale(9) translate(-44,-15)">
 				<g transform="matrix(100,0,0,100,60.9965,126)">
@@ -431,7 +431,7 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 		<div style="height: 30px; text-align: center;">Version <span id="version" class="select">{version}</span></div>
 		<div style="height: 30px; text-align: center;">Copyright &copy; <a href="https://www.lutzroeder.com" target="blank_">Lutz Roeder</a></div>
 	</div>
-	<a id="logo-github" class="center logo-github" href="https://github.com/lutzroeder/netron" target="blank_">
+	<a id="logo-github" class="center logo-github" href="https://github.com/vtemplier/vscode-netron" target="blank_">
 		<svg viewbox="0 0 438.549 438.549">
 			<path class="logo-fill" d="M409.132,114.573c-19.608-33.596-46.205-60.194-79.798-79.8C295.736,15.166,259.057,5.365,219.271,5.365
 				c-39.781,0-76.472,9.804-110.063,29.408c-33.596,19.605-60.192,46.204-79.8,79.8C9.803,148.168,0,184.854,0,224.63
@@ -501,13 +501,52 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 </div>
 <div id="menu" class="menu"></div>
 <div id="menu-button" class="menu-button">&#8801;</div>
-<script type="module" nonce="nonceValue">
-	import {BrowserHost} from "browserFilePath";
-	import {View} from "viewFilePath";
+<script type="module" nonce="%nonce%">
+	import { BrowserHost } from "%browserPath%";
+	import { View } from "%viewPath%";
+
+	const vscode = acquireVsCodeApi();
 	
 	var host = new BrowserHost();
 	window.__view__ = new View(host);
 	window.__view__.start();
+
+	function sleep(ms) {
+		return new Promise(resolve => setTimeout(resolve, ms));
+	}
+
+	async function docReady(fn)
+	{
+		while (document.body.className != "welcome")
+		{
+			await sleep(1);
+		};
+		fn();
+	}
+	
+	docReady(function(){
+
+		window.__view__._host._view.show('welcome spinner');
+
+		window.__view__._host._url = function(file) {
+    		return 'https://netron.app/' + file;
+		};
+
+		// Ask to host to send model
+		vscode.postMessage({command: 'request_model'});
+
+		window.addEventListener('message', event => {
+			const message = event.data; // The JSON data our extension sent
+	
+			switch (message.command) {
+				case 'transmit_model':
+					const file1 = new File([Uint8Array.from(message.value)], "%GRAPHNAME%", {type: ''});
+					window.__view__._host._open(file1, [file1]);
+					break;
+			}
+				
+		});
+	});
 	
 </script>
 </body>
