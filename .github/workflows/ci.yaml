@@ -10,6 +10,11 @@ on:
     branches: [master]
   schedule:
     - cron: '0 0 * * *'  # runs at 00:00 UTC every day
+  workflow_dispatch:
+    inputs:
+      vsce:
+        type: boolean
+        description: Publish to VSCode MarketPlace
 
 
 jobs:
@@ -34,3 +39,62 @@ jobs:
       - name: Build extension
         run: npm run compile
 
+      # Skip this step until tests exist
+      # - name: Run tests
+      #   run: npm run test
+
+  publish-vsce:
+    runs-on: ${{ matrix.os }}
+    strategy:
+        fail-fast: false
+        matrix:
+          os: [ubuntu-latest]
+          node: ['20']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Check VSCE version
+        id: check_vsce
+        shell: python
+        run: |
+          import json
+          import subprocess
+          
+          # Get local version
+          with open("./package.json") as f:
+              v_local = json.load(f)['version']
+
+          # Get latest version on VSCode marketplace
+          output = subprocess.check_output("vsce show vincent-templier.vscode-netron --json", shell=True)
+          v_vsce = json.loads(output)['versions'][0]['version']
+
+          print(f'Local version is {v_local}')
+          print(f'VSCE version is {v_vsce}')
+          
+          d = [a - b for a, b in zip(v_local, v_vsce)] # version diff
+
+          # Only publish if patch version increments by 1 or 2
+          increment = (d[0] == d[1] == 0) and (0 < d[2] < 3)
+          
+          os.system(f'echo "increment={increment}" >> $GITHUB_OUTPUT')
+          if increment:
+              print('Local version is higher than VSCE version. Publishing new version to VSCode Marketplace ✅.')
+
+      - name: Build and publish to VSCode Marketplace
+        continue-on-error: true
+        if: (github.event_name == 'push' || github.event.inputs.vsce == 'true')  && steps.check_vsce.outputs.increment == 'True'
+        env:
+          VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}
+        run: |
+          vsce package
+          vsce publish -p $VSCE_TOKEN
