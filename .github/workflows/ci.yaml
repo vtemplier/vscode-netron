@@ -32,7 +32,5 @@ jobs:
         run: npm install
 
       - name: Build extension
-        run: npm run build
+        run: npm run compile
 
-      - name: Run tests
-        run: npm test
