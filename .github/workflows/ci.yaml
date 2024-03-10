@@ -76,11 +76,11 @@ jobs:
           
           # Get local version
           with open("./package.json") as f:
-              v_local = json.load(f)['version']
+              v_local = tuple(map(int, json.load(f)['version'].split('.')))
 
           # Get latest version on VSCode marketplace
           output = subprocess.check_output("vsce show vincent-templier.vscode-netron --json", shell=True)
-          v_vsce = json.loads(output)['versions'][0]['version']
+          v_vsce = tuple(map(int, json.loads(output)['versions'][0]['version'].split('.')))
 
           print(f'Local version is {v_local}')
           print(f'VSCE version is {v_vsce}')
