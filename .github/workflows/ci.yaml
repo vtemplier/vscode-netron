@@ -71,6 +71,7 @@ jobs:
         id: check_vsce
         shell: python
         run: |
+          import os
           import json
           import subprocess
           
