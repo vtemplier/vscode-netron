@@ -96,7 +96,6 @@ jobs:
               print('Local version is higher than VSCE version. Publishing new version to VSCode Marketplace ✅.')
 
       - name: Build and publish to VSCode Marketplace
-        continue-on-error: true
         if: (github.event_name == 'push' || github.event.inputs.vsce == 'true')  && steps.check_vsce.outputs.increment == 'True'
         env:
           VSCE_TOKEN: ${{ secrets.VSCE_TOKEN }}

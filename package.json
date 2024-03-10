@@ -59,7 +59,7 @@
       }
     ]
   },
-  "icon": "./docs/netron-logo_128x128px.png",
+  "icon": "docs/netron-logo_128x128px.png",
   "repository": {
     "type": "git",
     "url": "https://github.com/vtemplier/vscode-netron"
