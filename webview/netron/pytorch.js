@@ -4,7 +4,7 @@
 import * as base from './base.js';
 import * as flatbuffers from './flatbuffers.js';
 import * as python from './python.js';
-import pytorch_metadata from "./pytorch-metadata.json" assert { type: 'json' };
+// import pytorch_metadata from "./pytorch-metadata.json" assert { type: 'json' };
 
 const pytorch = {};
 
@@ -4231,8 +4231,8 @@ pytorch.Metadata = class {
             return pytorch.Metadata._metadata;
         }
         try {
-            // const data = await context.request('pytorch-metadata.json');
-            const data = JSON.stringify(pytorch_metadata);
+            const data = await context.request('pytorch-metadata.json');
+            // const data = JSON.stringify(pytorch_metadata);
             pytorch.Metadata._metadata = new pytorch.Metadata(data);
             return pytorch.Metadata._metadata;
         } catch (error) {

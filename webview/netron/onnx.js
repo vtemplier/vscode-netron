@@ -1,7 +1,7 @@
 
 import * as protobuf from './protobuf.js';
 import * as text from './text.js';
-import onnx_metadata from "./onnx-metadata.json" assert { type: 'json' };
+// import onnx_metadata from "./onnx-metadata.json" assert { type: 'json' };
 
 const onnx = {};
 
@@ -985,8 +985,8 @@ onnx.Metadata = class {
             return onnx.Metadata._metadata;
         }
         try {
-            // const data = await context.request('onnx-metadata.json');
-            const data = JSON.stringify(onnx_metadata);
+            const data = await context.request('onnx-metadata.json');
+            // const data = JSON.stringify(onnx_metadata);
             onnx.Metadata._metadata = new onnx.Metadata(data);
             return onnx.Metadata._metadata;
         } catch (error) {

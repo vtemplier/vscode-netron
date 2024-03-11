@@ -66,6 +66,7 @@ export function activate(context: vscode.ExtensionContext) {
 			);
 
 			// Create URI variables for index.html
+			const netronUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'webview', 'netron'));
 			const iconUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'webview', 'netron', 'icon.png'));
 			const faviconUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'webview', 'netron', 'favicon.ico'));
 			const grapherSheetUri = panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri, 'webview', 'netron', 'grapher.css'));
@@ -79,6 +80,8 @@ export function activate(context: vscode.ExtensionContext) {
 			html = html.replace(new RegExp("%grapherSheetPath%", 'g'), grapherSheetUri.toString());
 			html = html.replace(new RegExp("%viewPath%", 'g'), viewUri.toString());
 			html = html.replace(new RegExp("%browserPath%", 'g'), browserUri.toString());
+
+			html = html.replace(new RegExp("%netronPath%", 'g'), netronUri.toString());
 			
 			// Use a nonce to only allow specific scripts to be run
 			html = html.replace(new RegExp("%nonce%", 'g'), getNonce().toString());
