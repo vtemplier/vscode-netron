@@ -9,7 +9,7 @@ This Visual Studio Code extension uses Netron that allows users to load and visu
 
 Currently the extension supports these file formats: `*.pt`, `*.pth`, `*.pb`, `*.mlmodel`, `*.tflite`, `*.onnx`, `*.h5`, `*.keras`, `*.paddle`, `*.pickle`, `*.safetensors`, `*.xmodel` and many more !
 
-Feel free to test the extension with models downloaded from the [ONNX Model Zoo](https://github.com/onnx/models) or [Hugging Face](https://huggingface.co/models) 😄.
+Feel free to test the extension with models downloaded from the [ONNX Model Zoo](https://github.com/onnx/models) or [Hugging Face](https://huggingface.co/models) 🤗.
 
 
 ![Demo Open in Netron](./docs/readme/Open_in_Netron.gif)
