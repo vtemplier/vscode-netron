@@ -17,8 +17,7 @@ openvino.ModelFactory = class {
             if (stream.length > 4) {
                 const buffer = stream.peek(Math.min(256, stream.length));
                 const signature = (buffer[0] | buffer[1] << 8 | buffer[2] << 16 | buffer [3] << 24) >>> 0;
-                if (signature === 0x00000000 || signature === 0x00000001 ||
-                    signature === 0x01306B47 || signature === 0x000D4B38 || signature === 0x0002C056) {
+                if (signature === 0x01306B47 || signature === 0x000D4B38 || signature === 0x0002C056) {
                     return;
                 }
                 for (let i = 0; i < buffer.length - 4; i++) {
@@ -78,10 +77,12 @@ openvino.ModelFactory = class {
                 throw new openvino.Error(`Unsupported OpenVINO format '${context.type}'.`);
             }
         }
-        const metadata = await context.metadata('openvino-metadata.json');
         let document = null;
+        const reader = xml.TextReader.open(stream);
+        if (!reader) {
+            throw new openvino.Error(`File format is not OpenVINO XML.`);
+        }
         try {
-            const reader = xml.TextReader.open(stream);
             document = reader.read();
         } catch (error) {
             const message = error && error.message ? error.message : error.toString();
@@ -91,6 +92,7 @@ openvino.ModelFactory = class {
             throw new openvino.Error('File format is not OpenVINO IR.');
         }
         const element = document.documentElement;
+        const metadata = await context.metadata('openvino-metadata.json');
         const object = (element) => {
             const obj = {};
             for (const attribute of element.attributes) {
@@ -394,7 +396,12 @@ openvino.Graph = class {
                 return values.map(layer.id, input.precision || layer.precision, input, body.edges);
             });
             const outputs = layer.output.map((output) => {
-                const precision = output && output.precision ? output.precision : layer && layer.precision ? layer.precision : null;
+                let precision = null;
+                if (output && output.precision) {
+                    precision = output.precision;
+                } else if (layer && layer.precision) {
+                    precision = layer.precision;
+                }
                 return values.map(layer.id, precision, output, null);
             });
             const subgraph = Array.isArray(net.input) || Array.isArray(net.output);
@@ -455,7 +462,14 @@ openvino.Node = class {
         const type = layer.type;
         this.type = metadata.type(type) || { name: type };
         for (let i = 0; i < inputs.length;) {
-            const input = this.type && Array.isArray(this.type.inputs) && i < this.type.inputs.length ? this.type.inputs[i] : inputs.length === 1 ? { name: 'input' } : { name: i.toString() };
+            let input;
+            if (this.type && Array.isArray(this.type.inputs) && i < this.type.inputs.length) {
+                input = this.type.inputs[i];
+            } else if (inputs.length === 1) {
+                input = { name: 'input' };
+            } else {
+                input = { name: i.toString() };
+            }
             const count = input.type === 'Tensor[]' ? inputs.length - i : 1;
             const values = inputs.slice(i, i + count);
             const argument = new openvino.Argument(input.name, values);
@@ -463,7 +477,14 @@ openvino.Node = class {
             i += count;
         }
         for (let i = 0; i < outputs.length;) {
-            const output = this.type && Array.isArray(this.type.outputs) && i < this.type.outputs.length ? this.type.outputs[i] : outputs.length === 1 ? { name: 'output' } : { name: i.toString() };
+            let output;
+            if (this.type && Array.isArray(this.type.outputs) && i < this.type.outputs.length) {
+                output = this.type.outputs[i];
+            } else if (outputs.length === 1) {
+                output = { name: 'output' };
+            } else {
+                output = { name: i.toString() };
+            }
             const count = output.type === 'Tensor[]' ? outputs.length - i : 1;
             const values = outputs.slice(i, i + count);
             const argument = new openvino.Argument(output.name, values);
@@ -797,4 +818,3 @@ openvino.Error = class extends Error {
 };
 
 export const ModelFactory = openvino.ModelFactory;
-

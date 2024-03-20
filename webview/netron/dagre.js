@@ -887,8 +887,8 @@ dagre.layout = (graph, layout) => {
                 }
             };
             const queue = g.children();
-            while (queue.length > 0) {
-                const v = queue.shift();
+            for (let i = 0; i < queue.length; i++) {
+                const v = queue[i];
                 const node = g.node(v).label;
                 if ('minRank' in node) {
                     node.borderLeft = [];
@@ -1240,8 +1240,8 @@ dagre.layout = (graph, layout) => {
                 if (maxRank !== undefined) {
                     const layers = Array.from(new Array(maxRank + 1), () => []);
                     const queue = nodes.sort((a, b) => a.label.rank - b.label.rank).map((node) => node.v).reverse();
-                    while (queue.length > 0) {
-                        const v = queue.shift();
+                    for (let i = 0; i < queue.length; i++) {
+                        const v = queue[i];
                         if (!visited.has(v)) {
                             visited.add(v);
                             const rank = g.node(v).label.rank;
@@ -1358,7 +1358,7 @@ dagre.layout = (graph, layout) => {
             const layers = buildLayerMatrix(g);
             for (const layer of layers) {
                 let orderShift = 0;
-                layer.forEach(function(v, i) {
+                layer.forEach((v, i) => {
                     const label = g.node(v).label;
                     label.order = i + orderShift;
                     if (label.selfEdges) {
@@ -1681,7 +1681,7 @@ dagre.layout = (graph, layout) => {
                         let prevNorthPos = -1;
                         let nextNorthPos;
                         let southPos = 0;
-                        south.forEach(function(v, southLookahead) {
+                        south.forEach((v, southLookahead) => {
                             if (g.node(v).label.dummy === 'border') {
                                 const predecessors = g.predecessors(v);
                                 if (predecessors.length) {

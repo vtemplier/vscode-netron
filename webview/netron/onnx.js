@@ -1,7 +1,6 @@
 
 import * as protobuf from './protobuf.js';
 import * as text from './text.js';
-// import onnx_metadata from "./onnx-metadata.json" assert { type: 'json' };
 
 const onnx = {};
 
@@ -115,7 +114,7 @@ onnx.Model = class {
         this._domain = model.domain;
         this._version = typeof model.model_version === 'number' || typeof model.model_version === 'bigint' ? model.model_version.toString() : '';
         this._description = model.doc_string;
-        this._metadata = new Map();
+        this._metadata = [];
         this._imports = null;
         const imports = new Map();
         if (model.opset_import && model.opset_import.length > 0) {
@@ -138,15 +137,15 @@ onnx.Model = class {
             const metadata = new Map(metadata_props.map((entry) => [entry.key, entry.value]));
             const converted_from = metadata.get('converted_from');
             if (converted_from) {
-                this._metadata.set('source', converted_from);
+                this.source = converted_from;
             }
             const author = metadata.get('author');
             if (author) {
-                this._metadata.set('author', author);
+                this._metadata.push(new onnx.Argument('author', author));
             }
             const company = metadata.get('company');
             if (company) {
-                this._metadata.set('company', company);
+                this._metadata.push(new onnx.Argument('company', company));
             }
             let license = metadata.get('license');
             const license_url = metadata.get('license_url');
@@ -154,7 +153,7 @@ onnx.Model = class {
                 license = `<a href='${license_url}'>${license ? license : license_url}</a>`;
             }
             if (license) {
-                this._metadata.set('license', license);
+                this._metadata.push(new onnx.Argument('license', license));
             }
             metadata.delete('author');
             metadata.delete('company');
@@ -170,7 +169,7 @@ onnx.Model = class {
                         imageMetadata[name] = value;
                         break;
                     default:
-                        this._metadata.set(name, value);
+                        this._metadata.push(new onnx.Argument(name, value));
                         break;
                 }
             }
@@ -195,6 +194,10 @@ onnx.Model = class {
 
     get producer() {
         return this._producer;
+    }
+
+    get source() {
+        return this._source;
     }
 
     get domain() {
@@ -986,7 +989,6 @@ onnx.Metadata = class {
         }
         try {
             const data = await context.request('onnx-metadata.json');
-            // const data = JSON.stringify(onnx_metadata);
             onnx.Metadata._metadata = new onnx.Metadata(data);
             return onnx.Metadata._metadata;
         } catch (error) {
@@ -1261,11 +1263,11 @@ onnx.Context.Graph = class {
         }
         if (type.tensor_type) {
             const tensor_type = type.tensor_type;
-            const shape = tensor_type.shape && tensor_type.shape.dim ? tensor_type.shape.dim.map((dim) => dim.dim_param ? dim.dim_param : dim.dim_value ? dim.dim_value : null) : [];
+            const shape = tensor_type.shape && tensor_type.shape.dim ? tensor_type.shape.dim.map((dim) => dim.dim_param ? dim.dim_param : dim.dim_value || null) : [];
             return this.createTensorType(tensor_type.elem_type, shape, null, denotation);
         } else if (type.sparse_tensor_type) {
             type = type.sparse_tensor_type;
-            const shape = type.shape && type.shape.dim ? type.shape.dim.map((dim) => dim.dim_param ? dim.dim_param : dim.dim_value ? dim.dim_value : null) : [];
+            const shape = type.shape && type.shape.dim ? type.shape.dim.map((dim) => dim.dim_param ? dim.dim_param : dim.dim_value || null) : [];
             return this.createTensorType(type.elem_type, shape, 'sparse', denotation);
         } else if (type.map_type) {
             return this.createMapType(type.map_type.key_type, this.createType(type.map_type.value_type), denotation);

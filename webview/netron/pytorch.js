@@ -4,7 +4,6 @@
 import * as base from './base.js';
 import * as flatbuffers from './flatbuffers.js';
 import * as python from './python.js';
-// import pytorch_metadata from "./pytorch-metadata.json" assert { type: 'json' };
 
 const pytorch = {};
 
@@ -409,13 +408,16 @@ pytorch.Node = class {
                     return new pytorch.Argument(name, value);
                 } else if (name === '_modules' && value && value.__class__ && value.__class__.__module__ === 'collections' && value.__class__.__name__ === 'OrderedDict' &&
                     value instanceof Map && Array.from(value).every(([, value]) => value.__class__)) {
-                    const values = Array.from(value).map(([name, value]) => {
+                    const values = Array.from(value).filter(([, value]) => !stack.has(value)).map(([name, value]) => {
+                        stack.add(value);
                         const item = {
                             name: name,
                             type: `${value.__class__.__module__}.${value.__class__.__name__}`,
                             obj: value
                         };
-                        return new pytorch.Node(metadata, group, item);
+                        const node = new pytorch.Node(metadata, group, item);
+                        stack.delete(value);
+                        return node;
                     });
                     return new pytorch.Argument(name, values, 'object[]');
                 } else if (value && Array.isArray(value) && value.length > 0 && value.every((obj) => obj && (obj.__class__ || obj === Object(obj)))) {
@@ -432,12 +434,16 @@ pytorch.Node = class {
                     });
                     return new pytorch.Argument(name, nodes, 'object[]');
                 } else if (value && (value.__class__ || isObject(value))) {
-                    const item = {
-                        type: value.__class__ ? `${value.__class__.__module__}.${value.__class__.__name__}` : 'builtins.object',
-                        obj: value
-                    };
-                    const node = new pytorch.Node(metadata, group, item, initializers, values, stack);
-                    return new pytorch.Argument(name, node, 'object');
+                    if (!stack.has(value)) {
+                        stack.add(value);
+                        const item = {
+                            type: value.__class__ ? `${value.__class__.__module__}.${value.__class__.__name__}` : 'builtins.object',
+                            obj: value
+                        };
+                        const node = new pytorch.Node(metadata, group, item, initializers, values, stack);
+                        stack.delete(value);
+                        return new pytorch.Argument(name, node, 'object');
+                    }
                 }
                 return createAttribute(metadata.attribute(type, name), name, value);
             });
@@ -583,7 +589,14 @@ pytorch.Node = class {
                 for (let i = 0; i < outputs.length; i++) {
                     const output = outputs[i];
                     const metadata = this.type && this.type.outputs && i < this.type.outputs.length ? this.type.outputs[i] : null;
-                    const name = metadata && metadata.name ? metadata.name : i === 0 ? 'output' : `output${i}`;
+                    let name;
+                    if (metadata && metadata.name) {
+                        name = metadata.name;
+                    } else if (i === 0) {
+                        name = 'output';
+                    } else {
+                        name = `output${i}`;
+                    }
                     let list = [output];
                     if (output.uses().length === 1 &&
                         output.uses()[0].user &&
@@ -632,7 +645,12 @@ pytorch.Tensor = class {
             this.stride = tensor.stride();
             const stride = this.stride;
             const offset = tensor.storage_offset();
-            const length = stride ? size.every((v) => v !== 0) ? size.reduce((a, v, i) => a + stride[i] * (v - 1), 1) : 0 : storage.size();
+            let length = 0;
+            if (!Array.isArray(stride)) {
+                length = storage.size();
+            } else if (size.every((v) => v !== 0)) {
+                length = size.reduce((a, v, i) => a + stride[i] * (v - 1), 1);
+            }
             if (offset !== 0 || length !== storage.size()) {
                 const itemsize = storage.dtype.itemsize();
                 this._offset = itemsize * offset;
@@ -1341,21 +1359,21 @@ pytorch.Execution = class extends python.Execution {
                 return execution.import(name);
             }
         });
-        this.registerFunction('torch.jit.load', function(file, map_location, extra_files) {
+        this.registerFunction('torch.jit.load', (file, map_location, extra_files) => {
             const cu = new torch.jit.CompilationUnit();
             cu.execution = execution;
             const cpp_module = torch._C.import_ir_module(cu, file, map_location, extra_files);
             return new torch.jit._script.RecursiveScriptModule(cpp_module);
         });
-        this.registerFunction('torch._C.import_ir_module', function(cu, reader) {
+        this.registerFunction('torch._C.import_ir_module', function(cu, reader, ...args) {
             switch (arguments.length) {
                 case 4: {
-                    const [, reader, device, extra_files] = arguments;
+                    const [device, extra_files] = args;
                     const deserializer = new pytorch.jit.ScriptModuleDeserializer(cu, reader);
                     return deserializer.deserialize(device, extra_files);
                 }
                 case 5: {
-                    const [, , storage_context, device, ts_id] = arguments;
+                    const [storage_context, device, ts_id] = args;
                     const deserializer = new pytorch.jit.ScriptModuleDeserializer(cu, reader, `.data/ts_code/${ts_id}/`, '.data/', storage_context);
                     return deserializer.deserialize(device, null);
                 }
@@ -1365,10 +1383,10 @@ pytorch.Execution = class extends python.Execution {
             }
 
         });
-        this.registerFunction('torch._C._import_ir_module_from_package', function(cu, reader, storage_context, map_location, ts_id) {
+        this.registerFunction('torch._C._import_ir_module_from_package', (cu, reader, storage_context, map_location, ts_id) => {
             return torch._C.import_ir_module(cu, reader, storage_context, null, ts_id);
         });
-        this.registerFunction('torch._C._jit_pass_inline', function(graph) {
+        this.registerFunction('torch._C._jit_pass_inline', (graph) => {
             const tryToGraphFunction = (node) => {
                 if (node.kind() === 'prim::CallFunction') {
                     // TODO
@@ -1407,13 +1425,13 @@ pytorch.Execution = class extends python.Execution {
             };
             inlineCalls(graph.blocks());
         });
-        this.registerFunction('torch.jit._script.unpackage_script_module', function(importer, script_module_id) {
+        this.registerFunction('torch.jit._script.unpackage_script_module', (importer, script_module_id) => {
             const cu = new torch.jit.CompilationUnit();
             cu.execution = execution;
             const cpp_module = torch._C._import_ir_module_from_package(cu, importer.zip_reader, importer.storage_context, importer.last_map_location, script_module_id);
             return new torch.jit._script.RecursiveScriptModule(cpp_module);
         });
-        this.registerFunction('torch.jit.jit_module_from_flatbuffer', function(f) {
+        this.registerFunction('torch.jit.jit_module_from_flatbuffer', (f) => {
             const cu = new torch.jit.CompilationUnit();
             cu.execution = execution;
             const stream = f;
@@ -1427,7 +1445,7 @@ pytorch.Execution = class extends python.Execution {
             // throw new pytorch.Error('torch.jit.mobile.serialization.Module not supported.');
             return torch.jit._script.wrap_cpp_module(cpp_module);
         });
-        this.registerFunction('torch.jit._script.wrap_cpp_module', function(cpp_module) {
+        this.registerFunction('torch.jit._script.wrap_cpp_module', (cpp_module) => {
             const init_fn = (script_module) => {
                 for (const [name, module] of new torch.ModuleDict(script_module._c).items()) {
                     script_module.__setattr__(name, torch.jit._script.wrap_cpp_module(module));
@@ -4232,7 +4250,6 @@ pytorch.Metadata = class {
         }
         try {
             const data = await context.request('pytorch-metadata.json');
-            // const data = JSON.stringify(pytorch_metadata);
             pytorch.Metadata._metadata = new pytorch.Metadata(data);
             return pytorch.Metadata._metadata;
         } catch (error) {

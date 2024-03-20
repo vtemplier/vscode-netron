@@ -258,12 +258,12 @@ mxnet.Model = class {
         this._version = manifest.version;
         this._description = manifest.description || '';
         this._runtime = manifest.runtime || '';
-        this._metadata = new Map();
+        this._metadata = [];
         if (manifest.author) {
-            this._metadata.set('author', manifest.author);
+            this._metadata.push(new mxnet.Argument('author', manifest.author));
         }
         if (manifest.license) {
-            this._metadata.set('license', manifest.license);
+            this._metadata.push(new mxnet.Argument('license', manifest.license));
         }
         this._graphs = [new mxnet.Graph(metadata, manifest, symbol, params)];
     }
@@ -410,7 +410,7 @@ mxnet.Graph = class {
                                     let shape = [];
                                     if (arg_node.attrs && arg_node.attrs.__dtype__ && arg_node.attrs.__shape__) {
                                         try {
-                                            dataType = parseInt(arg_node.attrs.__dtype__);
+                                            dataType = parseInt(arg_node.attrs.__dtype__, 10);
                                             shape = JSON.parse(`[${arg_node.attrs.__shape__.replace('(', '').replace(')', '').split(' ').join('').split(',').map(((dimension) => dimension || '"?"')).join(',')}]`);
                                         } catch (err) {
                                             // continue regardless of error

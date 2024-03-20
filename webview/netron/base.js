@@ -25,6 +25,13 @@ base.Complex128 = class Complex {
     }
 };
 
+BigInt.prototype.toNumber = function() {
+    if (this > Number.MAX_SAFE_INTEGER || this < Number.MIN_SAFE_INTEGER) {
+        throw new Error('64-bit value exceeds safe integer.');
+    }
+    return Number(this);
+};
+
 if (!DataView.prototype.getFloat16) {
     DataView.prototype.getFloat16 = function(byteOffset, littleEndian) {
         const value = this.getUint16(byteOffset, littleEndian);
@@ -193,9 +200,12 @@ DataView.prototype.getIntBits = DataView.prototype.getUintBits || function(offse
     offset = offset * bits;
     const position = Math.floor(offset / 8);
     const remainder = offset % 8;
-    let value = (remainder + bits) <= 8 ?
-        littleEndian ? this.getUint8(position) >> remainder /* TODO */ : this.getUint8(position) >> (8 - remainder - bits) :
-        littleEndian ? this.getUint16(position, true) >> remainder /* TODO */ : this.getUint16(position, false) >> (16 - remainder - bits);
+    let value;
+    if ((remainder + bits) <= 8) {
+        value = littleEndian ? this.getUint8(position) >> remainder /* TODO */ : this.getUint8(position) >> (8 - remainder - bits);
+    } else {
+        value = littleEndian ? this.getUint16(position, true) >> remainder /* TODO */ : this.getUint16(position, false) >> (16 - remainder - bits);
+    }
     value &= (1 << bits) - 1;
     if (value & (1 << (bits - 1))) {
         value -= 1 << bits;
@@ -207,9 +217,12 @@ DataView.prototype.getUintBits = DataView.prototype.getUintBits || function(offs
     offset = offset * bits;
     const position = Math.floor(offset / 8);
     const remainder = offset % 8;
-    const value = (remainder + bits) <= 8 ?
-        littleEndian ? this.getUint8(position) >> remainder /* TODO */ : this.getUint8(position) >> (8 - remainder - bits) :
-        littleEndian ? this.getUint16(position, true) >> remainder /* TODO */ : this.getUint16(position, false) >> (16 - remainder - bits);
+    let value;
+    if ((remainder + bits) <= 8) {
+        value = littleEndian ? this.getUint8(position) >> remainder /* TODO */ : this.getUint8(position) >> (8 - remainder - bits);
+    } else {
+        value = littleEndian ? this.getUint16(position, true) >> remainder /* TODO */ : this.getUint16(position, false) >> (16 - remainder - bits);
+    }
     return value & ((1 << bits) - 1);
 };
 
@@ -341,7 +354,7 @@ base.BinaryReader = class {
     }
 
     align(mod) {
-        if (this._position % mod !== 0) {
+        if ((this._position % mod) !== 0) {
             this.skip(mod - (this._position % mod));
         }
     }
@@ -637,7 +650,7 @@ base.Telemetry = class {
                 }
                 const build = (entries) => entries.map(([name, value]) => `${name}=${encodeURIComponent(value)}`).join('&');
                 this._cache = this._cache || build(Array.from(this._config));
-                const key = (name, value) => this._schema.get(name) || ('number' === typeof value && !isNaN(value) ? 'epn.' : 'ep.') + name;
+                const key = (name, value) => this._schema.get(name) || (typeof value === 'number' && !isNaN(value) ? 'epn.' : 'ep.') + name;
                 const body = build(Object.entries(params).map(([name, value]) => [key(name, value), value]));
                 const url = `https://analytics.google.com/g/collect?${this._cache}`;
                 this._navigator.sendBeacon(url, body);

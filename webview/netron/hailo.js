@@ -37,9 +37,9 @@ hailo.Model = class {
         this.graphs = [new hailo.Graph(metadata, configuration, container.weights)];
         this.name = configuration && configuration.name || "";
         this.format = container.format + (container.metadata && container.metadata.sdk_version ? ` v${container.metadata.sdk_version}` : '');
-        this.metadata = new Map();
+        this.metadata = [];
         if (container.metadata && container.metadata.state) {
-            this.metadata.set('state', container.metadata.state);
+            this.metadata.push(new hailo.Argument('state', container.metadata.state));
         }
     }
 };
@@ -70,19 +70,25 @@ hailo.Graph = class {
         });
         for (const layer of layers) {
             switch (layer.type) {
-                case 'input_layer':
-                case 'const_input': {
-                    const shape = Array.isArray(layer.output_shapes) && layer.output_shapes.length > 0 ? layer.output_shapes[0] : null;
-                    const type = shape ? new hailo.TensorType('?', new hailo.TensorShape(shape)) : null;
-                    const argument = new hailo.Argument('input', [values.map(layer.name, type)]);
-                    this.inputs.push(argument);
+                case 'const_input':
+                case 'input_layer': {
+                    for (let i = 0; i < layer.output.length; i++) {
+                        const shape = Array.isArray(layer.output_shapes) && layer.output_shapes.length > 0 ? layer.output_shapes[0] : null;
+                        const type = shape ? new hailo.TensorType('?', new hailo.TensorShape(shape)) : null;
+                        const output = layer.output[i];
+                        const name = `${layer.name}\n${output}`;
+                        const argument = new hailo.Argument('input', [values.map(name, type)]);
+                        this.inputs.push(argument);
+                    }
                     break;
                 }
                 case 'output_layer': {
                     for (let i = 0; i < layer.input.length; i++) {
                         const shape = Array.isArray(layer.input_shapes) && layer.input_shapes.length > 0 ? layer.input_shapes[i] : null;
                         const type = shape ? new hailo.TensorType('?', new hailo.TensorShape(shape)) : null;
-                        const argument = new hailo.Argument('output', [values.map(layer.input[i], type)]);
+                        const input = layer.input[i];
+                        const name = `${input}\n${layer.name}`;
+                        const argument = new hailo.Argument('output', [values.map(name, type)]);
                         this.outputs.push(argument);
                     }
                     break;
@@ -129,7 +135,8 @@ hailo.Node = class {
         this.inputs = layer.input.map((name, index) => {
             const shape = layer.input_shapes ? layer.input_shapes[index] : null;
             const type = shape ? new hailo.TensorType('?', new hailo.TensorShape(shape)) : null;
-            return new hailo.Argument("input", [values.map(name, type)]);
+            name = `${name}\n${layer.name}`;
+            return new hailo.Argument("input", [values.map(name, type, null)]);
         });
         const layer_params = layer.params ? Object.entries(layer.params) : [];
         const params_list = layer_params.reduce((acc, [name, value]) => {
@@ -149,10 +156,11 @@ hailo.Node = class {
             return new hailo.Argument(name, [values.map('', tensor.type, tensor)]);
         });
         this.inputs = this.inputs.concat(params_list).concat(params_from_npz);
-        this.outputs = (layer.output || []).map((_, index) => {
+        this.outputs = (layer.output || []).map((name, index) => {
             const shape = layer.output_shapes ? layer.output_shapes[index] : null;
             const type = shape ? new hailo.TensorType('?', new hailo.TensorShape(shape)) : null;
-            return new hailo.Argument("output", [values.map(layer.name, type)]);
+            name = `${layer.name}\n${name}`;
+            return new hailo.Argument("output", [values.map(name, type, null)]);
         });
         const attrs = Object.assign(layer.params || {}, { original_names: layer.original_names || [] });
         this.attributes = Object.entries(attrs).map(([name, value]) => new hailo.Attribute(metadata.attribute(layer.type, name), name, value));
@@ -255,20 +263,20 @@ hailo.Container = class {
             }
             const configuration = context.peek('json');
             if (configuration && configuration.name && configuration.net_params && configuration.layers) {
-                return new hailo.Container(context, basename.join('.'), configuration, null);
+                return new hailo.Container(context, 'hailo.configuration', basename.join('.'), configuration, null);
             }
         } else if (identifier.toLowerCase().endsWith('.metadata.json')) {
             basename.pop();
             const metadata = context.peek('json');
             if (metadata && metadata.state && metadata.hn) {
-                return new hailo.Container(context, basename.join('.'), null, metadata);
+                return new hailo.Container(context, 'hailo.metadata', basename.join('.'), null, metadata);
             }
         }
         return null;
     }
 
-    constructor(context, basename, configuration, metadata) {
-        this.type = metadata ? 'hailo.metadata' : configuration ? 'hailo.configuration' : 'hailo';
+    constructor(context, type, basename, configuration, metadata) {
+        this.type = type;
         this.context = context;
         this.basename = basename;
         this.configuration = configuration;

@@ -11,22 +11,13 @@ coreml.ModelFactory = class {
         const extension = identifier.split('.').pop().toLowerCase();
         const tags = context.tags('pb');
         if (tags.get(1) === 0 && tags.get(2) === 2) {
-            if (extension === 'pb') {
-                const tags = context.tags('pb+');
-                const keys = Object.keys(tags).map((key) => parseInt(key, 10));
-                const match = (key) =>
-                    (key >= 200 && key < 220) ||
-                    (key >= 300 && key < 320) ||
-                    (key >= 400 && key < 420) ||
-                    (key >= 500 && key < 520) ||
-                    (key >= 550 && key < 560) ||
-                    (key >= 600 && key < 620) ||
-                    (key === 900) ||
-                    (key >= 2000 && key < 2010) ||
-                    (key === 3000);
-                if (!keys.some((key) => match(key))) {
-                    return;
-                }
+            const match = (key) =>
+                (key >= 200 && key < 220) || (key >= 300 && key < 320) || (key >= 400 && key < 420) ||
+                (key >= 500 && key < 520) || (key >= 550 && key < 560) || (key >= 600 && key < 620) ||
+                (key === 900) ||
+                (key >= 2000 && key < 2010) || (key === 3000);
+            if (extension === 'pb' && Array.from(tags.keys()).every((key) => !match(key))) {
+                return;
             }
             context.type = 'coreml.pb';
             return;
@@ -194,7 +185,7 @@ coreml.Model = class {
 
     constructor(metadata, format, model, weights) {
         this.format = `${format || 'Core ML'} v${model.specificationVersion}`;
-        this.metadata = new Map();
+        this.metadata = [];
         const context = new coreml.Context(metadata, model, weights);
         const graph = new coreml.Graph(context);
         this.graphs = [graph];
@@ -207,10 +198,10 @@ coreml.Model = class {
                 this.description = properties.shortDescription;
             }
             if (properties.author) {
-                this.metadata.set('author', properties.author);
+                this.metadata.push(new coreml.Argument('author', properties.author));
             }
             if (properties.license) {
-                this.metadata.set('license', properties.license);
+                this.metadata.push(new coreml.Argument('license', properties.license));
             }
             if (metadata.userDefined && Object.keys(properties.userDefined).length > 0) {
                 /* empty */
@@ -236,11 +227,11 @@ coreml.Graph = class {
         }
         this.inputs = context.inputs.map((argument) => {
             const values = argument.value.map((value) => value.obj);
-            return new coreml.Argument(argument.name, argument.visible, values);
+            return new coreml.Argument(argument.name, values, argument.visible);
         });
         this.outputs = context.outputs.map((argument) => {
             const values = argument.value.map((value) => value.obj);
-            return new coreml.Argument(argument.name, argument.visible, values);
+            return new coreml.Argument(argument.name, values, argument.visible);
         });
         for (const obj of context.nodes) {
             const attributes = obj.attributes;
@@ -263,10 +254,10 @@ coreml.Graph = class {
 
 coreml.Argument = class {
 
-    constructor(name, visible, value) {
+    constructor(name, value, visible) {
         this.name = name;
-        this.visible = visible;
         this.value = value;
+        this.visible = visible === false ? false : true;
     }
 };
 
@@ -277,7 +268,7 @@ coreml.Value = class {
             throw new coreml.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
         this.name = name;
-        this.type = type ? type : initializer ? initializer.type : null;
+        this.type = !type && initializer ? initializer.type : type;
         this.description = description || null;
         this.initializer = initializer || null;
         this.quantization = initializer ? initializer.quantization : null;
@@ -299,11 +290,11 @@ coreml.Node = class {
         this.description = obj.description || '';
         this.inputs = (obj.inputs || []).map((argument) => {
             const values = argument.value.map((value) => value.obj);
-            return new coreml.Argument(argument.name, argument.visible, values);
+            return new coreml.Argument(argument.name, values, argument.visible);
         });
         this.outputs = (obj.outputs || []).map((argument) => {
             const values = argument.value.map((value) => value.obj);
-            return new coreml.Argument(argument.name, argument.visible, values);
+            return new coreml.Argument(argument.name, values, argument.visible);
         });
         this.attributes = Object.entries(obj.attributes).map(([name, value]) => {
             const metadata = context.metadata.attribute(obj.type, name);
@@ -1221,8 +1212,8 @@ coreml.Context = class {
                         const signature = reader.uint32();
                         if (signature === 0xdeadbeef) {
                             reader.uint32(); // dataType
-                            const size = Number(reader.uint64());
-                            const offset = Number(reader.uint64());
+                            const size = reader.uint64().toNumber();
+                            const offset = reader.uint64().toNumber();
                             stream.seek(offset);
                             const length = (type.shape.dimensions || []).reduce((a, b) => a * b, 1);
                             switch (type.dataType) {

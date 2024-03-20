@@ -41,8 +41,7 @@ mnn.Model = class {
         if (!sources.has(net.sourceType)) {
             throw new mnn.Error(`Unsupported model source '${net.sourceType}'.`);
         }
-        this.metadata = new Map();
-        this.metadata.set('source', sources.get(net.sourceType));
+        this.source = sources.get(net.sourceType);
         this.graphs = [new mnn.Graph(metadata, net)];
     }
 };
@@ -242,7 +241,7 @@ mnn.Value = class {
 
     constructor(name, type, initializer) {
         this.name = name;
-        this.type = type ? type : initializer ? initializer.type : null;
+        this.type = !type && initializer ? initializer.type : type;
         this.initializer = initializer || null;
     }
 };

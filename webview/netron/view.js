@@ -26,7 +26,7 @@ view.View = class {
         };
         this._options = Object.assign({}, this._defaultOptions);
         this._model = null;
-        this._graphs = [];
+        this._stack = [];
         this._selection = [];
         this._sidebar = new view.Sidebar(this._host);
         this._searchText = '';
@@ -265,7 +265,7 @@ view.View = class {
     find() {
         if (this._graph) {
             this._graph.select(null);
-            const content = new view.FindSidebar(this._host, this.activeGraph);
+            const content = new view.FindSidebar(this._host, this.activeGraph, this.activeSignature);
             content.on('search-text-changed', (sender, text) => {
                 this._searchText = text;
             });
@@ -338,8 +338,8 @@ view.View = class {
 
     _reload() {
         this.show('welcome spinner');
-        if (this._model && this._graphs.length > 0) {
-            this._updateGraph(this._model, this._graphs).catch((error) => {
+        if (this._model && this._stack.length > 0) {
+            this._updateGraph(this._model, this._stack).catch((error) => {
                 if (error) {
                     this.error(error, 'Graph update failed.', 'welcome');
                 }
@@ -544,7 +544,15 @@ view.View = class {
 
     _wheelHandler(e) {
         if (e.shiftKey || e.ctrlKey || this._options.mousewheel === 'zoom') {
-            const delta = -e.deltaY * (e.deltaMode === 1 ? 0.05 : e.deltaMode ? 1 : 0.002) * (e.ctrlKey ? 10 : 1);
+            let factor;
+            if (e.deltaMode === 1) {
+                factor = 0.05;
+            } else if (e.deltaMode) {
+                factor = 1;
+            } else {
+                factor = 0.002;
+            }
+            const delta = -e.deltaY * factor * (e.ctrlKey ? 10 : 1);
             this._updateZoom(this._zoom * Math.pow(2, delta), e);
             e.preventDefault();
         }
@@ -635,8 +643,16 @@ view.View = class {
                 });
             }
             await this._timeout(20);
-            const graphs = Array.isArray(model.graphs) && model.graphs.length > 0 ? [model.graphs[0]] : [];
-            return await this._updateGraph(model, graphs);
+            const stack = [];
+            if (Array.isArray(model.graphs) && model.graphs.length > 0) {
+                const [graph] = model.graphs;
+                const entry = {
+                    graph: graph,
+                    signature: Array.isArray(graph.signatures) && graph.signatures.length > 0 ? graph.signatures[0] : null
+                };
+                stack.push(entry);
+            }
+            return await this._updateGraph(model, stack);
         } catch (error) {
             if (error && context.identifier) {
                 error.context = context.identifier;
@@ -645,14 +661,13 @@ view.View = class {
         }
     }
 
-    async _updateActiveGraph(graph) {
+    async _updateActive(stack) {
         this._sidebar.close();
         if (this._model) {
-            const model = this._model;
             this.show('welcome spinner');
             await this._timeout(200);
             try {
-                await this._updateGraph(model, [graph]);
+                await this._updateGraph(this._model, stack);
             } catch (error) {
                 if (error) {
                     this.error(error, 'Graph update failed.', 'welcome');
@@ -662,13 +677,23 @@ view.View = class {
     }
 
     get activeGraph() {
-        return Array.isArray(this._graphs) && this._graphs.length > 0 ? this._graphs[0] : null;
+        if (Array.isArray(this._stack) && this._stack.length > 0) {
+            return this._stack[0].graph;
+        }
+        return null;
     }
 
-    async _updateGraph(model, graphs) {
+    get activeSignature() {
+        if (Array.isArray(this._stack) && this._stack.length > 0) {
+            return this._stack[0].signature;
+        }
+        return null;
+    }
+
+    async _updateGraph(model, stack) {
         await this._timeout(100);
-        const graph = Array.isArray(graphs) && graphs.length > 0 ? graphs[0] : null;
-        if (graph && graph !== this._graphs[0]) {
+        const graph = Array.isArray(stack) && stack.length > 0 ? stack[0].graph : null;
+        if (graph && (this._stack.length === 0 || graph !== this._stack[0].graph)) {
             const nodes = graph.nodes;
             if (nodes.length > 2048) {
                 if (!this._host.confirm('Large model detected.', 'This graph contains a large number of nodes and might take a long time to render. Do you want to continue?')) {
@@ -681,10 +706,10 @@ view.View = class {
                 }
             }
         }
-        const update = async (model, graphs) => {
+        const update = async (model, stack) => {
             this._model = model;
-            this._graphs = graphs;
-            await this.renderGraph(this._model, this.activeGraph, this._options);
+            this._stack = stack;
+            await this.renderGraph(this._model, this.activeGraph, this.activeSignature, this._options);
             if (this._page !== 'default') {
                 this.show('default');
             }
@@ -693,11 +718,11 @@ view.View = class {
             while (path.children.length > 1) {
                 path.removeChild(path.lastElementChild);
             }
-            if (this._graphs.length <= 1) {
+            if (this._stack.length <= 1) {
                 back.style.opacity = 0;
             } else {
                 back.style.opacity = 1;
-                const last = this._graphs.length - 2;
+                const last = this._stack.length - 2;
                 const count = Math.min(2, last);
                 if (count < last) {
                     const element = this._host.document.createElement('button');
@@ -706,15 +731,15 @@ view.View = class {
                     path.appendChild(element);
                 }
                 for (let i = count; i >= 0; i--) {
-                    const graph = this._graphs[i];
+                    const graph = this._stack[i].graph;
                     const element = this._host.document.createElement('button');
                     element.setAttribute('class', 'toolbar-path-name-button');
                     element.addEventListener('click', () => {
                         if (i > 0) {
-                            this._graphs = this._graphs.slice(i);
-                            this._updateGraph(this._model, this._graphs);
+                            this._stack = this._stack.slice(i);
+                            this._updateGraph(this._model, this._stack);
                         }
-                        this.showDefinition(this._graphs[0]);
+                        this.showDefinition(this._stack[0]);
                     });
                     const name = graph && graph.name ? graph.name : '';
                     if (name.length > 24) {
@@ -729,12 +754,12 @@ view.View = class {
             }
         };
         const lastModel = this._model;
-        const lastGraphs = this._graphs;
+        const lastStack = this._stack;
         try {
-            await update(model, graphs);
+            await update(model, stack);
             return this._model;
         } catch (error) {
-            await update(lastModel, lastGraphs);
+            await update(lastModel, lastStack);
             throw error;
         }
     }
@@ -742,19 +767,23 @@ view.View = class {
     pushGraph(graph) {
         if (graph && graph !== this.activeGraph && Array.isArray(graph.nodes)) {
             this._sidebar.close();
-            this._updateGraph(this._model, [graph].concat(this._graphs));
+            const entry = {
+                graph: graph,
+                signature: Array.isArray(graph.signatures) && graph.signatures.length > 0 ? graph.signatures[0] : null
+            };
+            this._updateGraph(this._model, [entry].concat(this._stack));
         }
     }
 
     popGraph() {
-        if (this._graphs.length > 1) {
+        if (this._stack.length > 1) {
             this._sidebar.close();
-            return this._updateGraph(this._model, this._graphs.slice(1));
+            return this._updateGraph(this._model, this._stack.slice(1));
         }
         return null;
     }
 
-    async renderGraph(model, graph, options) {
+    async renderGraph(model, graph, signature, options) {
         this._graph = null;
         const canvas = this._element('canvas');
         while (canvas.lastChild) {
@@ -782,7 +811,7 @@ view.View = class {
             layout.ranker = 'longest-path';
         }
         const viewGraph = new view.Graph(this, model, options, groups, layout);
-        viewGraph.add(graph);
+        viewGraph.add(graph, signature);
         // Workaround for Safari background drag/zoom issue:
         // https://stackoverflow.com/questions/40887193/d3-js-zoom-is-not-working-with-mousewheel-in-safari
         const background = this._host.document.createElementNS('http://www.w3.org/2000/svg', 'rect');
@@ -945,9 +974,20 @@ view.View = class {
     showModelProperties() {
         if (this._model) {
             try {
-                const modelSidebar = new view.ModelSidebar(this._host, this._model, this.activeGraph);
+                const modelSidebar = new view.ModelSidebar(this._host, this._model, this.activeGraph, this.activeSignature);
                 modelSidebar.on('update-active-graph', (sender, graph) => {
-                    this._updateActiveGraph(graph);
+                    const entry = {
+                        graph: graph,
+                        signature: Array.isArray(graph.signatures) && graph.signatures.length > 0 ? graph.signatures[0] : null
+                    };
+                    this._updateActive([entry]);
+                });
+                modelSidebar.on('update-active-graph-signature', (sender, signature) => {
+                    const stack = this._stack.map((entry) => {
+                        return { graph: entry.graph, signature: entry.signature };
+                    });
+                    stack[0].signature = signature;
+                    this._updateActive(stack);
                 });
                 const content = modelSidebar.render();
                 this._sidebar.open(content, 'Model Properties');
@@ -1278,7 +1318,7 @@ view.Menu = class {
                     shortcut += shift ? 'Shift+' : '';
                     shortcut += key;
                 }
-                let code = (cmdOrCtrl ? 0x1000 : 0) | (cmd ? 0x0800 : 0) | (ctrl ? 0x0400 : 0) | (alt ? 0x0200 : 0 | shift ? 0x0100 : 0);
+                let code = (cmdOrCtrl ? 0x1000 : 0) | (cmd ? 0x0800 : 0) | (ctrl ? 0x0400 : 0) | (alt ? 0x0200 : 0) | (shift ? 0x0100 : 0);
                 code |= this._keyCodes.has(key) ? this._keyCodes.get(key) : key.charCodeAt(0);
                 this._accelerators.set(code, action);
             }
@@ -1641,7 +1681,7 @@ view.Graph = class extends grapher.Graph {
         return this._values.get(name);
     }
 
-    add(graph) {
+    add(graph, signature) {
         const clusters = new Set();
         const clusterParentMap = new Map();
         const groups = graph.groups;
@@ -1657,11 +1697,15 @@ view.Graph = class extends grapher.Graph {
                 }
             }
         }
-        for (const input of graph.inputs) {
-            const viewInput = this.createInput(input);
-            this.setNode(viewInput);
-            for (const value of input.value) {
-                this.createValue(value).from = viewInput;
+        const inputs = signature ? signature.inputs : graph.inputs;
+        const outputs = signature ? signature.outputs : graph.outputs;
+        if (Array.isArray(inputs)) {
+            for (const input of inputs) {
+                const viewInput = this.createInput(input);
+                this.setNode(viewInput);
+                for (const value of input.value) {
+                    this.createValue(value).from = viewInput;
+                }
             }
         }
         for (const node of graph.nodes) {
@@ -1732,11 +1776,13 @@ view.Graph = class extends grapher.Graph {
                 }
             }
         }
-        for (const output of graph.outputs) {
-            const viewOutput = this.createOutput(output);
-            this.setNode(viewOutput);
-            for (const value of output.value) {
-                this.createValue(value).to.push(viewOutput);
+        if (Array.isArray(outputs)) {
+            for (const output of outputs) {
+                const viewOutput = this.createOutput(output);
+                this.setNode(viewOutput);
+                for (const value of output.value) {
+                    this.createValue(value).to.push(viewOutput);
+                }
             }
         }
     }
@@ -2372,7 +2418,13 @@ view.NodeSidebar = class extends view.ObjectSidebar {
             attributes.sort((a, b) => {
                 const au = a.name.toUpperCase();
                 const bu = b.name.toUpperCase();
-                return (au < bu) ? -1 : (au > bu) ? 1 : 0;
+                if (au < bu) {
+                    return -1;
+                }
+                if (au > bu) {
+                    return +1;
+                }
+                return 0;
             });
             for (const attribute of attributes) {
                 this._addAttribute(attribute.name, attribute);
@@ -2488,25 +2540,24 @@ view.NameValueView = class extends view.Control {
 
 view.SelectView = class extends view.Control {
 
-    constructor(host, values, selected) {
+    constructor(host, entries, selected) {
         super();
         this._host = host;
         this._elements = [];
-        this._values = values;
+        this._entries = Array.from(entries);
 
         const selectElement = this.createElement('select', 'sidebar-item-select');
         selectElement.addEventListener('change', (e) => {
-            this.emit('change', this._values[e.target.selectedIndex]);
+            this.emit('change', this._entries[e.target.selectedIndex][1]);
         });
         this._elements.push(selectElement);
-
-        for (const value of values) {
-            const optionElement = this.createElement('option');
-            optionElement.innerText = value.name || '';
+        for (const [name, value] of this._entries) {
+            const element = this.createElement('option');
+            element.innerText = name;
             if (value === selected) {
-                optionElement.setAttribute('selected', 'selected');
+                element.setAttribute('selected', 'selected');
             }
-            selectElement.appendChild(optionElement);
+            selectElement.appendChild(element);
         }
     }
 
@@ -2627,7 +2678,7 @@ view.AttributeView = class extends view.Control {
             const value = this._attribute.value;
             const content = type === 'tensor' && value && value.type ? value.type.toString() : this._attribute.type;
             const typeLine = this.createElement('div', 'sidebar-item-value-line-border');
-            typeLine.innerHTML = `type: ` + `<code><b>${content}</b></code>`;
+            typeLine.innerHTML = `type: <code><b>${content}</b></code>`;
             this._element.appendChild(typeLine);
             const description = this._attribute.description;
             if (description) {
@@ -2800,13 +2851,13 @@ view.ValueView = class extends view.Control {
 
     _bold(name, value) {
         const line = this.createElement('div');
-        line.innerHTML = `${name}: ` + `<b>${value}</b>`;
+        line.innerHTML = `${name}: <b>${value}</b>`;
         this._add(line);
     }
 
     _code(name, value) {
         const line = this.createElement('div');
-        line.innerHTML = `${name}: ` + `<code><b>${value}</b></code>`;
+        line.innerHTML = `${name}: <code><b>${value}</b></code>`;
         this._add(line);
     }
 
@@ -2978,7 +3029,7 @@ view.ConnectionSidebar = class extends view.ObjectSidebar {
 
 view.ModelSidebar = class extends view.ObjectSidebar {
 
-    constructor(host, model, graph) {
+    constructor(host, model, graph, signature) {
         super(host);
         this._model = model;
 
@@ -3006,18 +3057,39 @@ view.ModelSidebar = class extends view.ObjectSidebar {
         if (model.runtime) {
             this.addProperty('runtime', model.runtime);
         }
-        if (model.metadata) {
-            for (const [name, value] of Array.from(model.metadata)) {
-                this.addProperty(name, value);
-            }
+        if (model.source) {
+            this.addProperty('source', model.source);
         }
         const graphs = Array.isArray(model.graphs) ? model.graphs : [];
         if (graphs.length === 1 && graphs[0].name) {
             this.addProperty('graph', graphs[0].name);
         } else if (graphs.length > 1) {
-            const selector = new view.SelectView(this._host, model.graphs, graph);
+            const entries = new Map();
+            for (const graph of model.graphs) {
+                entries.set(graph.name, graph);
+            }
+            const selector = new view.SelectView(this._host, entries, graph);
             selector.on('change', (sender, data) => this.emit('update-active-graph', data));
             this.add('graph', selector);
+        }
+        if (Array.isArray(graph.signatures) && graph.signatures.length > 0) {
+            const entries = new Map();
+            entries.set('', graph);
+            for (const signature of graph.signatures) {
+                entries.set(signature.name, signature);
+            }
+            const selector = new view.SelectView(this._host, entries, signature || graph);
+            selector.on('change', (sender, data) => this.emit('update-active-graph-signature', data));
+            this.add('signature', selector);
+        }
+        const metadata = model.metadata instanceof Map ?
+            Array.from(model.metadata).map(([name, value]) => ({ name: name, value: value })) :
+            model.metadata;
+        if (Array.isArray(metadata) && metadata.length > 0) {
+            this.addHeader('Metadata');
+            for (const argument of model.metadata) {
+                this.addProperty(argument.name, argument.value);
+            }
         }
         if (graph) {
             if (graph.version) {
@@ -3032,15 +3104,17 @@ view.ModelSidebar = class extends view.ObjectSidebar {
             if (graph.description) {
                 this.addProperty('description', graph.description);
             }
-            if (Array.isArray(graph.inputs) && graph.inputs.length > 0) {
+            const inputs = signature ? signature.inputs : graph.inputs;
+            const outputs = signature ? signature.outputs : graph.outputs;
+            if (Array.isArray(inputs) && inputs.length > 0) {
                 this.addHeader('Inputs');
-                for (const input of graph.inputs) {
+                for (const input of inputs) {
                     this.addArgument(input.name, input);
                 }
             }
-            if (Array.isArray(graph.outputs) && graph.outputs.length > 0) {
+            if (Array.isArray(outputs) && outputs.length > 0) {
                 this.addHeader('Outputs');
-                for (const output of graph.outputs) {
+                for (const output of outputs) {
                     this.addArgument(output.name, output);
                 }
             }
@@ -3154,9 +3228,10 @@ view.DocumentationSidebar = class extends view.Control {
 
 view.FindSidebar = class extends view.Control {
 
-    constructor(host, graph) {
+    constructor(host, graph, signature) {
         super(host);
         this._graph = graph;
+        this._signature = signature;
         this._table = new Map();
         this._searchElement = this.createElement('input', 'sidebar-find-search');
         this._searchElement.setAttribute('id', 'search');
@@ -3284,7 +3359,8 @@ view.FindSidebar = class extends view.Control {
                 edges.add(value.name);
             }
         };
-        for (const input of this._graph.inputs) {
+        const inputs = this._signature ? this._signature.inputs : this._graph.inputs;
+        for (const input of inputs) {
             for (const value of input.value) {
                 edge(value);
             }
@@ -3312,7 +3388,8 @@ view.FindSidebar = class extends view.Control {
                 }
             }
         }
-        for (const output of this._graph.outputs) {
+        const outputs = this._signature ? this._signature.outputs : this._graph.inputs;
+        for (const output of outputs) {
             for (const value of output.value) {
                 edge(value);
             }
@@ -3876,19 +3953,19 @@ view.Documentation = class {
         if (source) {
             const generator = new markdown.Generator();
             const target = {};
-            if (source.name !== undefined) {
+            if (source.name) {
                 target.name = source.name;
             }
-            if (source.module !== undefined) {
+            if (source.module) {
                 target.module = source.module;
             }
-            if (source.category !== undefined) {
+            if (source.category) {
                 target.category = source.category;
             }
-            if (source.summary !== undefined) {
+            if (source.summary) {
                 target.summary = generator.html(source.summary);
             }
-            if (source.description !== undefined) {
+            if (source.description) {
                 target.description = generator.html(source.description);
             }
             if (Array.isArray(source.attributes)) {
@@ -4640,7 +4717,12 @@ markdown.Generator = class {
                         } while (prevCapZero !== value);
                     }
                     const text = this._escape(value);
-                    const href = email ? (`mailto:${text}`) : (match[1] === 'www.' ? `http://${text}` : text);
+                    let href = text;
+                    if (email) {
+                        href = `mailto:${text}`;
+                    } else if (text.startsWith('www.')) {
+                        href = `http://${text}`;
+                    }
                     source = source.substring(value.length);
                     tokens.push({ type: 'link', text: text, href: href, tokens: [{ type: 'text', text: text }] });
                     continue;
@@ -4710,7 +4792,7 @@ markdown.Generator = class {
                 case 'code': {
                     const code = token.text;
                     const [language] = (token.language || '').match(/\S*/);
-                    html += `<pre><code${language ? ` class="` + `language-${this._encode(language)}"` : ''}>${token.escaped ? code : this._encode(code)}</code></pre>\n`;
+                    html += `<pre><code${language ? ` class="language-${this._encode(language)}"` : ''}>${token.escaped ? code : this._encode(code)}</code></pre>\n`;
                     continue;
                 }
                 case 'table': {
@@ -4748,7 +4830,7 @@ markdown.Generator = class {
                     for (const item of token.items) {
                         let itemBody = '';
                         if (item.task) {
-                            const checkbox = `<input ${item.checked ? 'checked="" ' : ''}disabled="" type="checkbox"` + `> `;
+                            const checkbox = `<input ${item.checked ? 'checked="" ' : ''}disabled="" type="checkbox"> `;
                             if (loose) {
                                 if (item.tokens.length > 0 && item.tokens[0].type === 'text') {
                                     item.tokens[0].text = `${checkbox} ${item.tokens[0].text}`;
@@ -5466,7 +5548,8 @@ view.ModelFactoryService = class {
                     { name: 'Waifu2x data', tags: ['[].nInputPlane', '[].nOutputPlane', '[].weight', '[].bias'] },
                     { name: 'Brain.js data', tags: ['type', 'sizes', 'layers'] },
                     { name: 'Custom Vision metadata', tags: ['CustomVision.Metadata.Version'] },
-                    { name: 'W&B metadata', tags: ['program', 'host', 'executable'] }
+                    { name: 'W&B metadata', tags: ['program', 'host', 'executable'] },
+                    { name: 'TypeScript configuration data', tags: ['compilerOptions'] }
                 ];
                 const match = (obj, tag) => {
                     if (tag.startsWith('[].')) {

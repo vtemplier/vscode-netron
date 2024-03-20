@@ -27,7 +27,15 @@ hdf5.File = class {
             // https://support.hdfgroup.org/HDF5/doc/H5.format.html
             const data = this.data;
             delete this.data;
-            const reader = data instanceof Uint8Array ? new hdf5.BinaryReader(data) : (data.length < 0x10000000 ? new hdf5.BinaryReader(data.peek()) : new hdf5.StreamReader(data));
+            let reader;
+            if (data instanceof Uint8Array) {
+                reader = new hdf5.BinaryReader(data);
+            } else if (data.length < 0x10000000) {
+                const buffer = data.peek();
+                reader = new hdf5.BinaryReader(buffer);
+            } else {
+                reader = new hdf5.StreamReader(data);
+            }
             reader.skip(8);
             this._globalHeap = new hdf5.GlobalHeap(reader);
             const version = reader.byte();
@@ -932,7 +940,7 @@ hdf5.LinkInfo = class {
             case 0: {
                 const flags = reader.byte();
                 if ((flags & 1) !== 0) {
-                    this.maxCreationIndex = Number(reader.uint64());
+                    this.maxCreationIndex = reader.uint64().toNumber();
                 }
                 this.fractalHeapAddress = reader.offset();
                 this.nameIndexTreeAddress = reader.offset();
@@ -1062,13 +1070,13 @@ hdf5.Datatype = class {
         switch (this._class) {
             case 0: // fixed-point
                 if (this._size === 1) {
-                    return ((this._flags & 0x8) !== 0) ? reader.int8() : reader.byte();
+                    return this._flags & 0x8 ? reader.int8() : reader.byte();
                 } else if (this._size === 2) {
-                    return ((this._flags & 0x8) !== 0) ? reader.int16() : reader.uint16();
+                    return this._flags & 0x8 ? reader.int16() : reader.uint16();
                 } else if (this._size === 4) {
-                    return ((this._flags & 0x8) !== 0) ? reader.int32() : reader.uint32();
+                    return this._flags & 0x8 ? reader.int32() : reader.uint32();
                 } else if (this._size === 8) {
-                    return ((this._flags & 0x8) !== 0) ? Number(reader.int64()) : Number(reader.uint64());
+                    return this._flags & 0x8 ? reader.int64().toNumber() : reader.uint64().toNumber();
                 }
                 throw new hdf5.Error('Unsupported fixed-point datatype.');
             case 1: // floating-point
@@ -1452,7 +1460,7 @@ hdf5.AttributeInfo = class {
             case 0: {
                 const flags = reader.byte();
                 if ((flags & 1) !== 0) {
-                    this.maxCreationIndex = Number(reader.uint64());
+                    this.maxCreationIndex = reader.uint64().toNumber();
                 }
                 this.fractalHeapAddress = reader.offset();
                 this.attributeNameTreeAddress = reader.offset();

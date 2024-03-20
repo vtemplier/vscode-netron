@@ -50,7 +50,7 @@ mlir.Graph = class {
                 const shape = parts
                     .slice(0, -1)
                     .map((dimension) => {
-                        const parsedDimension = parseInt(dimension.trim());
+                        const parsedDimension = parseInt(dimension.trim(), 10);
                         return isNaN(parsedDimension) ? '?' : parsedDimension;
                     });
                 return new mlir.TensorType(dataType, new mlir.TensorShape(shape));
@@ -68,7 +68,7 @@ mlir.Graph = class {
         }
         // outputs of function
         for (let i = 0; i < func.outputTypes.length; i++) {
-            const output = `%return` + `/${i}`;
+            const output = `%return/${i}`;
             const outputType = func.outputTypes[i];
             const type = valueType(outputType);
             const value = new mlir.Value(output, type, "output desc", null);
@@ -231,7 +231,7 @@ mlir.Value = class {
             throw new mlir.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
         this.name = name;
-        this.type = type ? type : initializer && initializer.type ? initializer.type : null;
+        this.type = !type && initializer ? initializer.type : type;
         this.description = description || null;
         this.initializer = initializer || null;
     }
@@ -1160,6 +1160,7 @@ mlir.Utility = class {
             case 'f16': return 'float16';
             case 'f32': return 'float32';
             case 'f64': return 'float64';
+            case 'i8': return 'int8';
             case 'i16': return 'int16';
             case 'i32': return 'int32';
             case 'i64': return 'int64';

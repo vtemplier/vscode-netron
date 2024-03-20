@@ -109,7 +109,7 @@ zip.Archive = class {
                     reader.startDisk = reader.uint32();
                     header.diskRecords = reader.uint64();
                     header.totalRecords = reader.uint64();
-                    header.size = Number(reader.uint64());
+                    header.size = reader.uint64().toNumber();
                     header.offset = reader.uint64();
                     if (header.offset > Number.MAX_SAFE_INTEGER) {
                         stream.seek(location);
@@ -175,19 +175,19 @@ zip.Archive = class {
                     switch (type) {
                         case 0x0001:
                             if (header.size === 0xffffffff) {
-                                header.size = Number(reader.uint64());
+                                header.size = reader.uint64().toNumber();
                                 if (header.size === undefined) {
                                     throw new zip.Error('Zip 64-bit size not supported.');
                                 }
                             }
                             if (header.compressedSize === 0xffffffff) {
-                                header.compressedSize = Number(reader.uint64());
+                                header.compressedSize = reader.uint64().toNumber();
                                 if (header.compressedSize === undefined) {
                                     throw new zip.Error('Zip 64-bit compressed size not supported.');
                                 }
                             }
                             if (header.localHeaderOffset === 0xffffffff) {
-                                header.localHeaderOffset = Number(reader.uint64());
+                                header.localHeaderOffset = reader.uint64().toNumber();
                                 if (header.localHeaderOffset === undefined) {
                                     throw new zip.Error('Zip 64-bit offset not supported.');
                                 }
@@ -290,7 +290,7 @@ zip.Inflater = class {
                     }
                     case 1: { // block with fixed huffman trees
                         if (!zip.Inflater._staticLengthTree) {
-                            zip.Inflater._staticLengthTree = zip.HuffmanTree.create(new Uint8Array([].concat.apply([], [[144, 8], [112, 9], [24, 7], [8, 8]].map((x) => [...Array(x[0])].map(() => x[1])))));
+                            zip.Inflater._staticLengthTree = zip.HuffmanTree.create(new Uint8Array([].concat(...[[144, 8], [112, 9], [24, 7], [8, 8]].map((x) => [...Array(x[0])].map(() => x[1])))));
                             zip.Inflater._staticDistanceTree = zip.HuffmanTree.create(new Uint8Array([...Array(32)].map(() => 5)));
                         }
                         this._lengthTree = zip.Inflater._staticLengthTree;
