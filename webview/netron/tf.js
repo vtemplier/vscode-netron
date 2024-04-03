@@ -229,7 +229,7 @@ tf.ModelFactory = class {
                 stream.seek(-8);
                 const buffer = stream.read(8);
                 stream.seek(0);
-                const reader = new base.BinaryReader(buffer);
+                const reader = base.BinaryReader.open(buffer);
                 const offset = reader.uint64().toNumber();
                 if (offset < stream.length) {
                     context.type = 'tf.pb.mmap';
@@ -610,15 +610,15 @@ tf.ModelFactory = class {
             const stream = context.stream;
             const readDirectoryOffset = (stream) => {
                 stream.seek(-8);
-                const buffer = stream.read(8);
-                const reader = new base.BinaryReader(buffer);
+                stream = stream.stream(8);
+                const reader = base.BinaryReader.open(stream);
                 return reader.uint64().toNumber();
             };
             const readDirectory = (stream, offset) => {
                 const end = stream.position - 8;
                 stream.seek(offset);
-                const buffer = stream.read(end - offset);
-                const reader = protobuf.BinaryReader.open(buffer);
+                stream = stream.stream(end - offset);
+                const reader = protobuf.BinaryReader.open(stream);
                 return tf.proto.tensorflow.MemmappedFileSystemDirectory.decode(reader);
             };
             const offset = readDirectoryOffset(stream);
@@ -744,6 +744,7 @@ tf.Graph = class {
             if (meta_graph.meta_info_def && meta_graph.meta_info_def.tags) {
                 this.tags = meta_graph.meta_info_def.tags.join(', ');
             }
+            const output_arg_map = new Map();
             metadata = new tf.GraphMetadata(metadata, graph.library);
             const context = new tf.Context();
             for (const [key, signature_def] of Object.entries(meta_graph.signature_def)) {
@@ -762,12 +763,13 @@ tf.Graph = class {
                     const value = context.value(name, type);
                     const argument = new tf.Argument(key, [value]);
                     outputs.push(argument);
+                    output_arg_map.set(name, key);
                 }
                 const signature = new tf.Signature(key, inputs, outputs);
                 this.signatures.push(signature);
             }
             const nodes = graph.node || [];
-            context.graph(metadata, nodes);
+            context.graph(metadata, nodes, output_arg_map);
             this.nodes = context.nodes;
             this.inputs = context.inputs;
             this.outputs = context.outputs;
@@ -1432,7 +1434,7 @@ tf.TensorBundle.Table.Block = class {
         this.entries = new Map();
         stream.seek(offset);
         const buffer = stream.read(size); // blockContents
-        const compression = stream.byte();
+        const [compression] = stream.read(1);
         stream.skip(4); // crc32
         let reader = new tf.BinaryReader(buffer);
         switch (compression) {
@@ -1471,11 +1473,39 @@ tf.TensorBundle.Table.Block = class {
     }
 };
 
-tf.BinaryReader = class extends base.BinaryReader {
+tf.BinaryReader = class {
 
     constructor(buffer) {
-        super(buffer);
+        this._reader = base.BinaryReader.open(buffer);
         this._decoder = new TextDecoder('utf-8');
+    }
+
+    get length() {
+        return this._reader.length;
+    }
+
+    get position() {
+        return this._reader.position;
+    }
+
+    seek(position) {
+        this._reader.seek(position);
+    }
+
+    read(length) {
+        return this._reader.read(length);
+    }
+
+    byte() {
+        return this._reader.byte();
+    }
+
+    int32() {
+        return this._reader.int32();
+    }
+
+    uint32() {
+        return this._reader.uint32();
     }
 
     string() {
@@ -1594,7 +1624,8 @@ tf.EventFileReader = class {
             const uint64 = (stream) => {
                 const buffer = stream.read(8);
                 const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
-                return Number(view.getBigUint64(0, true));
+                const value = view.getBigUint64(0, true);
+                return value.toNumber();
             };
             const length = uint64(this._stream);
             this._stream.skip(4); // masked crc of length
@@ -1727,28 +1758,37 @@ tf.Context = class {
             }
             node.output = [];
         }
+        const node_output = (input) => {
+            const parts = input.split(':', 3);
+            let [name] = parts;
+            const index = parts.length === 1 ? 0 : parseInt(parts.pop(), 10);
+            const control = name.startsWith('^');
+            name = control ? name.substring(1) : name;
+            const from = nodes.get(name);
+            if (from) {
+                for (let i = from.output.length; i <= index; i++) {
+                    const key = i === 0 ? from.name : `${from.name}:${i}`;
+                    const value = { name: key, to: [] };
+                    from.output.push(value);
+                }
+            }
+            const key = index === 0 ? name : `${name}:${index}`;
+            return [key, index, control, from];
+        };
         for (const node of nodes.values()) {
             const inputs = node.input;
             node.input = [];
             node.controlDependencies = [];
             for (const input of inputs) {
-                const split = input.split(':', 3);
-                const [input_name] = split;
-                const input_index = split.length === 1 ? 0 : parseInt(split[split.length - 1], 10);
-                const from_name = input_name.startsWith('^') ? input_name.substring(1) : input_name;
-                const from = nodes.get(from_name);
-                const output_name = input_index === 0 ? from_name : `${from_name}:${input_index}`;
-                const input_arg = from ? { name: output_name, from: from } : { name: output_name };
-                if (input_name.startsWith('^')) {
-                    node.controlDependencies.push(input_arg);
-                } else {
-                    node.input.push(input_arg);
-                }
+                const [key, index, control, from] = node_output(input);
                 if (from) {
-                    for (let i = from.output.length; i <= input_index; i++) {
-                        from.output.push({ name: i === 0 ? from_name : `${from_name}:${i}`, to: [] });
-                    }
-                    from.output[input_index].to.push(node);
+                    from.output[index].to.push(node);
+                }
+                const value = { name: key, from: from };
+                if (control) {
+                    node.controlDependencies.push(value);
+                } else {
+                    node.input.push(value);
                 }
             }
         }

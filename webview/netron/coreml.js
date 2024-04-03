@@ -394,7 +394,7 @@ coreml.TensorType = class {
 coreml.TensorShape = class {
 
     constructor(dimensions) {
-        this.dimensions = dimensions.map((dim) => typeof dim === 'bigint' ? Number(dim) : dim);
+        this.dimensions = dimensions.map((dim) => typeof dim === 'bigint' ? dim.toNumber() : dim);
     }
 
     equals(obj) {
@@ -1208,7 +1208,7 @@ coreml.Context = class {
                     if (stream) {
                         stream.seek(offset);
                         const buffer = stream.read(32);
-                        const reader = new base.BinaryReader(buffer);
+                        const reader = base.BinaryReader.open(buffer);
                         const signature = reader.uint32();
                         if (signature === 0xdeadbeef) {
                             reader.uint32(); // dataType

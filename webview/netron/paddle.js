@@ -556,7 +556,7 @@ paddle.TensorType = class {
 paddle.TensorShape = class {
 
     constructor(dimensions) {
-        dimensions = dimensions.map((dim) => typeof dim === 'bigint' ? Number(dim) : dim);
+        dimensions = dimensions.map((dim) => typeof dim === 'bigint' ? dim.toNumber() : dim);
         this.dimensions = dimensions.map((dimension) => {
             return dimension !== -1 ? dimension : '?';
         });
@@ -719,7 +719,7 @@ paddle.NaiveBuffer = class {
     }
 
     read() {
-        const reader = new base.BinaryReader(this.stream);
+        const reader = base.BinaryReader.open(this.stream);
         if (this.meta_version >= 2) {
             reader.skip(2);
         }
@@ -799,7 +799,7 @@ paddle.Utility = class {
         if (!signature.every((value) => value === 0x00)) {
             throw new paddle.Error('Invalid paddle.TensorDesc signature.');
         }
-        const length = new base.BinaryReader(stream.read(4)).uint32();
+        const length = base.BinaryReader.open(stream.read(4)).uint32();
         const buffer = stream.read(length);
         const reader = protobuf.BinaryReader.open(buffer);
         const tensorDesc = paddle.proto.VarType.TensorDesc.decode(reader);

@@ -1651,7 +1651,7 @@ python.Execution = class {
         const datetime = this.register('datetime');
         this.register('gensim');
         this.register('io');
-        this.register('joblib');
+        const joblib = this.register('joblib');
         const functools = this.register('functools');
         this.registerType('functools.partial', class {});
         const keras = this.register('keras');
@@ -1667,6 +1667,7 @@ python.Execution = class {
         this.register('pandas._libs.internals');
         const pickle = this.register('pickle');
         const sklearn = this.register('sklearn');
+        this.register('sklearn.externals.joblib.numpy_pickle');
         const torch = this.register('torch');
         const torchvision = this.register('torchvision');
         this.register('torch.storage');
@@ -2074,6 +2075,20 @@ python.Execution = class {
                 return execution.invoke(this.subclass, [this.shape, this.dtype, this.data]);
             }
         });
+        this.registerType('joblib.numpy_pickle.NDArrayWrapper', class {
+            constructor(/* subtype, shape, dtype */) {
+            }
+            __setstate__(state) {
+                this.subclass = state.subclass;
+                this.filename = state.state;
+                this.allow_mmap = state.allow_mmap;
+            }
+            __read__(/* unpickler */) {
+                return this; // return execution.invoke(this.subclass, [ this.shape, this.dtype, this.data ]);
+            }
+        });
+        sklearn.externals.joblib.numpy_pickle.NDArrayWrapper = joblib.numpy_pickle.NDArrayWrapper;
+        sklearn.externals.joblib.numpy_pickle.NumpyArrayWrapper = joblib.numpy_pickle.NumpyArrayWrapper;
         this.registerType('keras.engine.sequential.Sequential', class {});
         this.registerType('lasagne.layers.conv.Conv2DLayer', class {});
         this.registerType('lasagne.layers.dense.DenseLayer', class {});
@@ -2529,6 +2544,7 @@ python.Execution = class {
         this.registerType('pandas.core.indexes.base.Index', class {});
         this.registerType('pandas.core.indexes.range.RangeIndex', class {});
         this.registerType('pandas.core.indexes.multi.MultiIndex', class {});
+        this.registerType('pandas.core.indexes.numeric.Int64Index', class {});
         this.registerType('pandas.core.index.Int64Index', class {});
         pandas.core.index.Index = pandas.core.indexes.base.Index;
         pandas.core.index._new_Index = pandas.core.indexes.base._new_Index;
@@ -2579,37 +2595,6 @@ python.Execution = class {
         this.registerType('sklearn.discriminant_analysis.QuadraticDiscriminantAnalysis', class {});
         this.registerType('sklearn.dummy.DummyClassifier', class {});
         this.registerType('sklearn.dummy.DummyRegressor', class {});
-        this.registerType('sklearn.externals.joblib.numpy_pickle.NumpyArrayWrapper', class {
-            constructor(/* subtype, shape, dtype */) {
-            }
-            __setstate__(state) {
-                this.subclass = state.subclass;
-                this.dtype = state.dtype;
-                this.shape = state.shape;
-                this.order = state.order;
-                this.allow_mmap = state.allow_mmap;
-            }
-            __read__(unpickler) {
-                if (this.dtype.__name__ === 'object') {
-                    return unpickler.load();
-                }
-                const size = this.dtype.itemsize * this.shape.reduce((a, b) => a * b, 1);
-                this.data = unpickler.read(size);
-                return execution.invoke(this.subclass, [this.shape, this.dtype, this.data]);
-            }
-        });
-        this.registerType('sklearn.externals.joblib.numpy_pickle.NDArrayWrapper', class {
-            constructor(/* subtype, shape, dtype */) {
-            }
-            __setstate__(state) {
-                this.subclass = state.subclass;
-                this.filename = state.state;
-                this.allow_mmap = state.allow_mmap;
-            }
-            __read__(/* unpickler */) {
-                return this; // return execution.invoke(this.subclass, [ this.shape, this.dtype, this.data ]);
-            }
-        });
         this.registerType('sklearn.ensemble._bagging.BaggingClassifier', class {});
         this.registerType('sklearn.ensemble._bagging.BaggingRegressor', class {});
         this.registerType('sklearn.ensemble._forest.RandomForestClassifier', class {});
@@ -4548,7 +4533,10 @@ python.Execution = class {
         this.registerType('torchvision.models.detection.rpn.RegionProposalNetwork', class {});
         this.registerType('torchvision.models.detection.rpn.RPNHead', class {});
         this.registerType('torchvision.models.detection.ssd.SSD', class {});
+        this.registerType('torchvision.models.detection.ssd.SSDClassificationHead', class {});
+        this.registerType('torchvision.models.detection.ssd.SSDHead', class {});
         this.registerType('torchvision.models.detection.ssd.SSDFeatureExtractorVGG', class {});
+        this.registerType('torchvision.models.detection.ssd.SSDRegressionHead', class {});
         this.registerType('torchvision.models.detection.ssdlite.SSDLiteClassificationHead', class {});
         this.registerType('torchvision.models.detection.ssdlite.SSDLiteFeatureExtractorMobileNet', class {});
         this.registerType('torchvision.models.detection.ssdlite.SSDLiteHead', class {});
@@ -4646,6 +4634,9 @@ python.Execution = class {
         this.registerType('torchvision.transforms.transforms.Scale', class extends torch.nn.modules.module.Module {});
         this.registerType('torchvision.transforms.transforms.ToPILImage', class {});
         this.registerType('torchvision.transforms.transforms.ToTensor', class {});
+        this.registerType('torchvision.transforms.v2._container.Compose', class {});
+        this.registerType('torchvision.transforms.v2._misc.Normalize', class {});
+        this.registerType('torchvision.transforms.v2._geometry.CenterCrop', class {});
         this.registerFunction('torchvision.models.resnet.resnet18', () => {});
         this.registerFunction('torchvision.models.resnet.resnet34', () => {});
         this.registerFunction('torchvision.models.resnet.resnet50', () => {});
@@ -4863,6 +4854,12 @@ python.Execution = class {
         this.registerFunction('torch._utils._rebuild_parameter', (data, requires_grad, backward_hooks) => {
             const param = self.invoke('torch.nn.parameter.Parameter', [data, requires_grad]);
             param.backward_hooks = backward_hooks;
+            return param;
+        });
+        this.registerFunction('torch._utils._rebuild_parameter_v2', (data, requires_grad, backward_hooks, state) => {
+            const param = self.invoke('torch.nn.parameter.Parameter', [data, requires_grad]);
+            param.backward_hooks = backward_hooks;
+            execution.invoke('torch._utils._set_obj_state', [param, state]);
             return param;
         });
         this.registerFunction('torch._utils._rebuild_parameter_with_state', (data, requires_grad, backward_hooks, state) => {

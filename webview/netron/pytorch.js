@@ -895,15 +895,18 @@ pytorch.Container.data_pkl = class extends pytorch.Container {
             if (pytorch.Utility.isTensor(obj)) {
                 return new pytorch.Container.data_pkl('tensor', obj);
             }
+            if (Array.isArray(obj) && obj.every((tensor) => pytorch.Utility.isTensor(tensor))) {
+                return new pytorch.Container.data_pkl('tensor', obj);
+            }
             if (obj instanceof Map) {
                 const entries = Array.from(obj).filter(([name, value]) => name === '_metadata' || pytorch.Utility.isTensor(value));
                 if (entries.length > 0) {
-                    return new pytorch.Container.data_pkl('tensor<>', obj);
+                    return new pytorch.Container.data_pkl('tensor', obj);
                 }
             } else if (!Array.isArray(obj)) {
                 const entries = Object.entries(obj).filter(([name, value]) => name === '_metadata' || pytorch.Utility.isTensor(value));
                 if (entries.length > 0) {
-                    return new pytorch.Container.data_pkl('tensor<>', obj);
+                    return new pytorch.Container.data_pkl('tensor', obj);
                 }
             }
             for (const key of ['', 'model', 'net']) {
@@ -924,12 +927,7 @@ pytorch.Container.data_pkl = class extends pytorch.Container {
     }
 
     get format() {
-        switch (this._type) {
-            case 'module': return 'PyTorch';
-            case 'tensor': return 'PyTorch Tensor';
-            case 'tensor<>': return 'PyTorch Pickle Weights';
-            default: return 'PyTorch Pickle';
-        }
+        return 'PyTorch Pickle';
     }
 
     get modules() {
@@ -945,6 +943,7 @@ pytorch.Container.data_pkl = class extends pytorch.Container {
                 return this._modules;
             }
             case 'tensor':
+            case 'tensor[]':
             case 'tensor<>': {
                 if (this._data) {
                     this._modules = pytorch.Utility.findWeights(this._data);
@@ -3829,6 +3828,7 @@ pytorch.Utility = class {
                             return null;
                         }
                     } else if (value && Array.isArray(value) && value.every((item) => pytorch.Utility.isTensor(item))) {
+                        layer._parameters = layer._parameters || new Map();
                         layer._parameters.set(parameter, value);
                     } else if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
                         layer[parameter] = value;
@@ -3847,7 +3847,7 @@ pytorch.nnapi = {};
 pytorch.nnapi.SerializedModel = class {
 
     constructor(serialized_model, buffers) {
-        const reader = new base.BinaryReader(serialized_model);
+        const reader = base.BinaryReader.open(serialized_model);
         this.version = reader.int32();
         if (this.version !== 1) {
             throw new pytorch.Error('Invalid NNAPI serialized model version.');

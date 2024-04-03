@@ -1,6 +1,4 @@
 
-import * as base from './base.js';
-
 const cntk = {};
 
 cntk.ModelFactory = class {
@@ -27,9 +25,8 @@ cntk.ModelFactory = class {
             case 'cntk.v1': {
                 let obj = null;
                 try {
-                    const stream = context.stream;
-                    const buffer = stream.peek();
-                    obj = new cntk.ComputationNetwork(buffer);
+                    const reader = context.read('binary');
+                    obj = new cntk.ComputationNetwork(reader);
                 } catch (error) {
                     const message = error && error.message ? error.message : error.toString();
                     throw new cntk.Error(`File format is not CNTK v1 (${message.replace(/\.$/, '')}).`);
@@ -597,96 +594,8 @@ cntk.GraphMetadata = class {
 
 cntk.ComputationNetwork = class {
 
-    constructor(buffer) {
-        const reader = new base.BinaryReader(buffer);
-        reader.match = function(text) {
-            const position = this.position;
-            for (let i = 0; i < text.length; i++) {
-                if (this.uint16() !== text.charCodeAt(i)) {
-                    this.seek(position);
-                    return false;
-                }
-            }
-            if (this.uint16() !== 0) {
-                this.seek(position);
-                return false;
-            }
-            return true;
-        };
-        reader.assert = function(text) {
-            if (!this.match(text)) {
-                throw new cntk.Error(`Invalid '${text}' signature.`);
-            }
-        };
-        reader.string = function() {
-            const content = [];
-            let c = this.uint16();
-            while (c !== 0) {
-                content.push(String.fromCharCode(c));
-                c = this.uint16();
-            }
-            return content.join('');
-        };
-        reader.strings = function() {
-            const size = Number(this.uint64());
-            const array = new Array(size);
-            for (let i = 0; i < size; i++) {
-                array[i] = this.string();
-            }
-            return array;
-        };
-        reader.booleans = function() {
-            const size = Number(this.uint64());
-            const array = new Array(size);
-            for (let i = 0; i < size; i++) {
-                array[i] = this.boolean();
-            }
-            return array;
-        };
-        reader.matrix = function () {
-            const type = this.byte();
-            switch (type) {
-                case 100: {
-                    // dense
-                    this.assert('BMAT');
-                    const elsize = Number(this.uint64());
-                    const value = {};
-                    value.name = this.string();
-                    value.format = this.uint32();
-                    value.rows = Number(this.uint64());
-                    value.columns = Number(this.uint64());
-                    this.read(elsize * value.rows * value.columns);
-                    this.assert('EMAT');
-                    return value;
-                }
-                case 115: // sparse
-                    throw new cntk.Error('Matrix sparse type not implemented.');
-                default:
-                    throw new cntk.Error(`Matrix type '${type}' not implemented.`);
-            }
-        };
-        reader.shape = function(acceptLegacyFormat) {
-            const dims = [];
-            const rank = this.uint32();
-            let dim0 = 0;
-            if (rank > 0) {
-                dim0 = this.uint32();
-            }
-            if (!acceptLegacyFormat || dim0 !== 0) {
-                if (rank > 0) {
-                    dims.push(dim0);
-                }
-                for (let i = 1; i < rank; i++) {
-                    dims.push(this.uint32());
-                }
-            } else {
-                const dim = this.uint32();
-                dims.push(this.uint32());
-                dims.push(rank);
-                dims.push(dim);
-            }
-            return { __type__: 'shape', dims: dims };
-        };
+    constructor(reader) {
+        reader = new cntk.BinaryReader(reader);
         const shape = (dims) => {
             return { __type__: 'shape', dims: dims };
         };
@@ -1048,6 +957,156 @@ cntk.ComputationNetwork = class {
         }
         reader.assert('ERootNodes');
         reader.assert('ECN');
+    }
+};
+
+cntk.BinaryReader = class {
+
+    constructor(reader) {
+        this._reader = reader;
+    }
+
+    get position() {
+        return this._reader.position;
+    }
+
+    seek(offset) {
+        this._reader.seek(offset);
+    }
+
+    skip(offset) {
+        this._reader.skip(offset);
+    }
+
+    read(length) {
+        return this._reader.read(length);
+    }
+
+    boolean() {
+        return this._reader.boolean();
+    }
+
+    byte() {
+        return this._reader.byte();
+    }
+
+    int32() {
+        return this._reader.int32();
+    }
+
+    uint16() {
+        return this._reader.uint16();
+    }
+
+    uint32() {
+        return this._reader.uint32();
+    }
+
+    uint64() {
+        return this._reader.uint64();
+    }
+
+    float32() {
+        return this._reader.float32();
+    }
+
+    float64() {
+        return this._reader.float64();
+    }
+
+    match(text) {
+        const position = this.position;
+        for (let i = 0; i < text.length; i++) {
+            if (this.uint16() !== text.charCodeAt(i)) {
+                this.seek(position);
+                return false;
+            }
+        }
+        if (this.uint16() !== 0) {
+            this.seek(position);
+            return false;
+        }
+        return true;
+    }
+
+    assert(text) {
+        if (!this.match(text)) {
+            throw new cntk.Error(`Invalid '${text}' signature.`);
+        }
+    }
+
+    string() {
+        const content = [];
+        let c = this.uint16();
+        while (c !== 0) {
+            content.push(String.fromCharCode(c));
+            c = this.uint16();
+        }
+        return content.join('');
+    }
+
+    strings() {
+        const size = this.uint64().toNumber();
+        const array = new Array(size);
+        for (let i = 0; i < size; i++) {
+            array[i] = this.string();
+        }
+        return array;
+    }
+
+    booleans() {
+        const size = this.uint64().toNumber();
+        const array = new Array(size);
+        for (let i = 0; i < size; i++) {
+            array[i] = this.boolean();
+        }
+        return array;
+    }
+
+    matrix() {
+        const type = this.byte();
+        switch (type) {
+            case 100: {
+                // dense
+                this.assert('BMAT');
+                const elsize = this.uint64().toNumber();
+                const value = {};
+                value.name = this.string();
+                value.format = this.uint32();
+                value.rows = this.uint64().toNumber();
+                value.columns = this.uint64().toNumber();
+                this.read(elsize * value.rows * value.columns);
+                this.assert('EMAT');
+                return value;
+            }
+            case 115: // sparse
+                throw new cntk.Error('Matrix sparse type not implemented.');
+            default:
+                throw new cntk.Error(`Matrix type '${type}' not implemented.`);
+        }
+    }
+
+    shape(acceptLegacyFormat) {
+        const dims = [];
+        const rank = this.uint32();
+        let dim0 = 0;
+        if (rank > 0) {
+            dim0 = this.uint32();
+        }
+        if (!acceptLegacyFormat || dim0 !== 0) {
+            if (rank > 0) {
+                dims.push(dim0);
+            }
+            for (let i = 1; i < rank; i++) {
+                dims.push(this.uint32());
+            }
+        } else {
+            const dim = this.uint32();
+            dims.push(this.uint32());
+            dims.push(rank);
+            dims.push(dim);
+        }
+        return { __type__: 'shape', dims: dims };
     }
 };
 
