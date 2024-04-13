@@ -2,13 +2,22 @@
   "name": "vscode-netron",
   "displayName": "vscode-netron",
   "description": "Visualize machine learning models with Netron in VSCode",
-  "version": "1.0.3",
+  "version": "1.0.4",
   "engines": {
     "vscode": "^1.86.0"
   },
   "categories": [
     "Machine Learning",
     "Visualization"
+  ],
+  "keywords": [
+    "netron",
+    "onnx",
+    "pytorch",
+    "tensorflow",
+    "keras",
+    "tflite",
+    "paddle"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
