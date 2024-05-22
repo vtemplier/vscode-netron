@@ -13,6 +13,7 @@ src/**
 **/*.map
 **/*.ts
 tool/**
+.github/**
 
 # lock
 package-lock.json
