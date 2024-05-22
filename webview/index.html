@@ -528,15 +528,22 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 
 		window.__view__._host._view.show('welcome spinner');
 
+		// Redefinition of host methods
 		window.__view__._host._url = function(file) {
     		return '%netronPath%/' + file;
+		};
+
+		window.__view__._host.error = function(message, detail) {
+			vscode.postMessage({command: 'alert',
+								text: message + "\n" + detail})
+			console.log(message, detail);
 		};
 
 		// Ask to host to send model
 		vscode.postMessage({command: 'request_model'});
 
 		window.addEventListener('message', event => {
-			const message = event.data; // The JSON data our extension sent
+			const message = event.data;
 	
 			switch (message.command) {
 				case 'transmit_model':

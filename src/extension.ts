@@ -94,10 +94,14 @@ export function activate(context: vscode.ExtensionContext) {
 			panel.webview.onDidReceiveMessage(
 				message => {
 				  switch (message.command) {
+					case 'alert':
+						vscode.window.showErrorMessage(message.text);
+						return;
 					case 'request_model':
 						panel.webview.postMessage({
 							command: "transmit_model", 
 							value: Uint8Array.from(Buffer.from(fs.readFileSync(modelFile!)))});
+						return;
 				  }
 				},
 				undefined,
