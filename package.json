@@ -22,6 +22,16 @@
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
+      "languages": [
+        {
+          "id": "netron",
+          "extensions": [".onnx", ".h5", ".tflite", ".cntk", ".ckpt", ".pt", ".pb", ".graphdef", ".tf", ".torchscript", ".trt", ".engine", ".safetensors", ".gguf", "paddle"],
+          "icon": {
+            "light": "docs/icon/netron-black.svg",
+            "dark": "docs/icon/netron.svg"
+          }
+        }
+    ],
     "menus": {
 			"commandPalette": [
 				{

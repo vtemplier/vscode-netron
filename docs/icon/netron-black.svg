@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="100%" viewBox="0 0 1024 1024">
+
+        <circle cx="512" cy="512" r="431" fill="none" stroke="#000000" stroke-width="42px"/>
+        <path d="M296,392L540,280" stroke="#000000" stroke-width="12px"/>
+        <path d="M296,632L540,280" stroke="#000000" stroke-width="12px"/>
+        <path d="M296,392L540,435" stroke="#000000" stroke-width="12px"/>
+        <path d="M296,632L540,435" stroke="#000000" stroke-width="12px"/>
+        <path d="M296,392L540,590" stroke="#000000" stroke-width="12px"/>
+        <path d="M296,632L540,590" stroke="#000000" stroke-width="12px"/>
+        <path d="M296,392L540,744" stroke="#000000" stroke-width="12px"/>
+        <path d="M296,632L540,744" stroke="#000000" stroke-width="12px"/>
+        <path d="M540,280L785,512" stroke="#000000" stroke-width="12px"/>
+        <path d="M540,590L785,512" stroke="#000000" stroke-width="12px"/>
+        <path d="M540,435L785,512" stroke="#000000" stroke-width="12px"/>
+        <path d="M540,744L785,512" stroke="#000000" stroke-width="12px"/>
+        <g transform="translate(296,392)">
+            <circle cx="0" cy="0" r="51" fill="#000000"/>
+        </g>
+        <g transform="translate(296,632)">
+            <circle cx="0" cy="0" r="51" fill="#000000"/>
+        </g>
+        <g transform="translate(540,280)">
+            <circle cx="0" cy="0" r="51" fill="#000000"/>
+        </g>
+        <g transform="translate(540,435)">
+            <circle cx="0" cy="0" r="51" fill="#000000"/>
+        </g>
+        <g transform="translate(540,590)">
+            <circle cx="0" cy="0" r="51" fill="#000000"/>
+        </g>
+        <g transform="translate(540,744)">
+            <circle cx="0" cy="0" r="51" fill="#000000"/>
+        </g>
+        <g transform="translate(785,512)">
+            <circle cx="0" cy="0" r="51" fill="#000000"/>
+        </g>
+</svg>
