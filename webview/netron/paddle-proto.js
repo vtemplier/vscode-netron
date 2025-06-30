@@ -7,12 +7,9 @@ paddle.framework.proto = {};
 
 paddle.framework.proto.Version = class Version {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new paddle.framework.proto.Version();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -70,12 +67,9 @@ paddle.framework.proto.AttrType = {
 
 paddle.framework.proto.Complex = class Complex {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new paddle.framework.proto.Complex();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -91,10 +85,10 @@ paddle.framework.proto.Complex = class Complex {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'r')) {
-            throw new Error("Excepted 'r'.");
+            throw new Error("Expected 'r'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'i')) {
-            throw new Error("Excepted 'i'.");
+            throw new Error("Expected 'i'.");
         }
         return message;
     }
@@ -117,10 +111,10 @@ paddle.framework.proto.Complex = class Complex {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "r")) {
-            throw new Error("Excepted 'r'.");
+            throw new Error("Expected 'r'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, "i")) {
-            throw new Error("Excepted 'i'.");
+            throw new Error("Expected 'i'.");
         }
         return message;
     }
@@ -131,12 +125,9 @@ paddle.framework.proto.Complex.prototype.i = 0;
 
 paddle.framework.proto.Scalar = class Scalar {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new paddle.framework.proto.Scalar();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -161,7 +152,7 @@ paddle.framework.proto.Scalar = class Scalar {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'type')) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -193,7 +184,7 @@ paddle.framework.proto.Scalar = class Scalar {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "type")) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -222,7 +213,7 @@ paddle.framework.proto.OpDesc = class OpDesc {
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.OpDesc();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -247,7 +238,7 @@ paddle.framework.proto.OpDesc = class OpDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'type')) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -279,7 +270,7 @@ paddle.framework.proto.OpDesc = class OpDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "type")) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -304,7 +295,7 @@ paddle.framework.proto.OpDesc.Attr = class Attr {
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.OpDesc.Attr();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -374,10 +365,10 @@ paddle.framework.proto.OpDesc.Attr = class Attr {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'name')) {
-            throw new Error("Excepted 'name'.");
+            throw new Error("Expected 'name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'type')) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -454,10 +445,10 @@ paddle.framework.proto.OpDesc.Attr = class Attr {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "name")) {
-            throw new Error("Excepted 'name'.");
+            throw new Error("Expected 'name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, "type")) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -478,12 +469,12 @@ paddle.framework.proto.OpDesc.Attr.prototype.scalar = null;
 paddle.framework.proto.OpDesc.Var = class Var {
 
     constructor() {
-        this["arguments"] = [];
+        this.arguments = [];
     }
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.OpDesc.Var();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -491,7 +482,7 @@ paddle.framework.proto.OpDesc.Var = class Var {
                     message.parameter = reader.string();
                     break;
                 case 2:
-                    message["arguments"].push(reader.string());
+                    message.arguments.push(reader.string());
                     break;
                 default:
                     reader.skipType(tag & 7);
@@ -499,7 +490,7 @@ paddle.framework.proto.OpDesc.Var = class Var {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'parameter')) {
-            throw new Error("Excepted 'parameter'.");
+            throw new Error("Expected 'parameter'.");
         }
         return message;
     }
@@ -514,7 +505,7 @@ paddle.framework.proto.OpDesc.Var = class Var {
                     message.parameter = reader.string();
                     break;
                 case "arguments":
-                    reader.array(message["arguments"], () => reader.string());
+                    reader.array(message.arguments, () => reader.string());
                     break;
                 default:
                     reader.field(tag, message);
@@ -522,7 +513,7 @@ paddle.framework.proto.OpDesc.Var = class Var {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "parameter")) {
-            throw new Error("Excepted 'parameter'.");
+            throw new Error("Expected 'parameter'.");
         }
         return message;
     }
@@ -540,7 +531,7 @@ paddle.framework.proto.OpProto = class OpProto {
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.OpProto();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -565,10 +556,10 @@ paddle.framework.proto.OpProto = class OpProto {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'type')) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'comment')) {
-            throw new Error("Excepted 'comment'.");
+            throw new Error("Expected 'comment'.");
         }
         return message;
     }
@@ -600,10 +591,10 @@ paddle.framework.proto.OpProto = class OpProto {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "type")) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, "comment")) {
-            throw new Error("Excepted 'comment'.");
+            throw new Error("Expected 'comment'.");
         }
         return message;
     }
@@ -614,12 +605,9 @@ paddle.framework.proto.OpProto.prototype.comment = "";
 
 paddle.framework.proto.OpProto.Var = class Var {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new paddle.framework.proto.OpProto.Var();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -650,10 +638,10 @@ paddle.framework.proto.OpProto.Var = class Var {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'name')) {
-            throw new Error("Excepted 'name'.");
+            throw new Error("Expected 'name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'comment')) {
-            throw new Error("Excepted 'comment'.");
+            throw new Error("Expected 'comment'.");
         }
         return message;
     }
@@ -691,10 +679,10 @@ paddle.framework.proto.OpProto.Var = class Var {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "name")) {
-            throw new Error("Excepted 'name'.");
+            throw new Error("Expected 'name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, "comment")) {
-            throw new Error("Excepted 'comment'.");
+            throw new Error("Expected 'comment'.");
         }
         return message;
     }
@@ -710,12 +698,9 @@ paddle.framework.proto.OpProto.Var.prototype.quant = false;
 
 paddle.framework.proto.OpProto.Attr = class Attr {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new paddle.framework.proto.OpProto.Attr();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -746,13 +731,13 @@ paddle.framework.proto.OpProto.Attr = class Attr {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'name')) {
-            throw new Error("Excepted 'name'.");
+            throw new Error("Expected 'name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'type')) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'comment')) {
-            throw new Error("Excepted 'comment'.");
+            throw new Error("Expected 'comment'.");
         }
         return message;
     }
@@ -790,13 +775,13 @@ paddle.framework.proto.OpProto.Attr = class Attr {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "name")) {
-            throw new Error("Excepted 'name'.");
+            throw new Error("Expected 'name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, "type")) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, "comment")) {
-            throw new Error("Excepted 'comment'.");
+            throw new Error("Expected 'comment'.");
         }
         return message;
     }
@@ -812,12 +797,9 @@ paddle.framework.proto.OpProto.Attr.prototype.support_tensor = false;
 
 paddle.framework.proto.VarType = class VarType {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new paddle.framework.proto.VarType();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -828,10 +810,10 @@ paddle.framework.proto.VarType = class VarType {
                     message.selected_rows = paddle.framework.proto.VarType.TensorDesc.decode(reader, reader.uint32());
                     break;
                 case 3:
-                    message.lod_tensor = paddle.framework.proto.VarType.LoDTensorDesc.decode(reader, reader.uint32());
+                    message.dense_tensor = paddle.framework.proto.VarType.DenseTensorDesc.decode(reader, reader.uint32());
                     break;
                 case 4:
-                    message.tensor_array = paddle.framework.proto.VarType.LoDTensorArrayDesc.decode(reader, reader.uint32());
+                    message.tensor_array = paddle.framework.proto.VarType.DenseTensorArrayDesc.decode(reader, reader.uint32());
                     break;
                 case 5:
                     message.reader = paddle.framework.proto.VarType.ReaderDesc.decode(reader, reader.uint32());
@@ -860,7 +842,7 @@ paddle.framework.proto.VarType = class VarType {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'type')) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -877,11 +859,11 @@ paddle.framework.proto.VarType = class VarType {
                 case "selected_rows":
                     message.selected_rows = paddle.framework.proto.VarType.TensorDesc.decodeText(reader);
                     break;
-                case "lod_tensor":
-                    message.lod_tensor = paddle.framework.proto.VarType.LoDTensorDesc.decodeText(reader);
+                case "dense_tensor":
+                    message.dense_tensor = paddle.framework.proto.VarType.DenseTensorDesc.decodeText(reader);
                     break;
                 case "tensor_array":
-                    message.tensor_array = paddle.framework.proto.VarType.LoDTensorArrayDesc.decodeText(reader);
+                    message.tensor_array = paddle.framework.proto.VarType.DenseTensorArrayDesc.decodeText(reader);
                     break;
                 case "reader":
                     message.reader = paddle.framework.proto.VarType.ReaderDesc.decodeText(reader);
@@ -910,7 +892,7 @@ paddle.framework.proto.VarType = class VarType {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "type")) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -918,7 +900,7 @@ paddle.framework.proto.VarType = class VarType {
 
 paddle.framework.proto.VarType.prototype.type = 0;
 paddle.framework.proto.VarType.prototype.selected_rows = null;
-paddle.framework.proto.VarType.prototype.lod_tensor = null;
+paddle.framework.proto.VarType.prototype.dense_tensor = null;
 paddle.framework.proto.VarType.prototype.tensor_array = null;
 paddle.framework.proto.VarType.prototype.reader = null;
 paddle.framework.proto.VarType.prototype.tuple = null;
@@ -942,13 +924,15 @@ paddle.framework.proto.VarType.Type = {
     "BF16": 22,
     "COMPLEX64": 23,
     "COMPLEX128": 24,
-    "LOD_TENSOR": 7,
+    "FP8_E4M3FN": 32,
+    "FP8_E5M2": 33,
+    "DENSE_TENSOR": 7,
     "SELECTED_ROWS": 8,
     "FEED_MINIBATCH": 9,
     "FETCH_LIST": 10,
     "STEP_SCOPES": 11,
     "LOD_RANK_TABLE": 12,
-    "LOD_TENSOR_ARRAY": 13,
+    "DENSE_TENSOR_ARRAY": 13,
     "PLACE_LIST": 14,
     "READER": 15,
     "RAW": 17,
@@ -970,7 +954,7 @@ paddle.framework.proto.VarType.TensorDesc = class TensorDesc {
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.VarType.TensorDesc();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -986,7 +970,7 @@ paddle.framework.proto.VarType.TensorDesc = class TensorDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'data_type')) {
-            throw new Error("Excepted 'data_type'.");
+            throw new Error("Expected 'data_type'.");
         }
         return message;
     }
@@ -1009,7 +993,7 @@ paddle.framework.proto.VarType.TensorDesc = class TensorDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "data_type")) {
-            throw new Error("Excepted 'data_type'.");
+            throw new Error("Expected 'data_type'.");
         }
         return message;
     }
@@ -1017,14 +1001,11 @@ paddle.framework.proto.VarType.TensorDesc = class TensorDesc {
 
 paddle.framework.proto.VarType.TensorDesc.prototype.data_type = 0;
 
-paddle.framework.proto.VarType.LoDTensorDesc = class LoDTensorDesc {
-
-    constructor() {
-    }
+paddle.framework.proto.VarType.DenseTensorDesc = class DenseTensorDesc {
 
     static decode(reader, length) {
-        const message = new paddle.framework.proto.VarType.LoDTensorDesc();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const message = new paddle.framework.proto.VarType.DenseTensorDesc();
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -1032,7 +1013,7 @@ paddle.framework.proto.VarType.LoDTensorDesc = class LoDTensorDesc {
                     message.tensor = paddle.framework.proto.VarType.TensorDesc.decode(reader, reader.uint32());
                     break;
                 case 2:
-                    message.lod_level = reader.int32();
+                    message.legacy_lod_level = reader.int32();
                     break;
                 default:
                     reader.skipType(tag & 7);
@@ -1040,13 +1021,13 @@ paddle.framework.proto.VarType.LoDTensorDesc = class LoDTensorDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'tensor')) {
-            throw new Error("Excepted 'tensor'.");
+            throw new Error("Expected 'tensor'.");
         }
         return message;
     }
 
     static decodeText(reader) {
-        const message = new paddle.framework.proto.VarType.LoDTensorDesc();
+        const message = new paddle.framework.proto.VarType.DenseTensorDesc();
         reader.start();
         while (!reader.end()) {
             const tag = reader.tag();
@@ -1054,8 +1035,8 @@ paddle.framework.proto.VarType.LoDTensorDesc = class LoDTensorDesc {
                 case "tensor":
                     message.tensor = paddle.framework.proto.VarType.TensorDesc.decodeText(reader);
                     break;
-                case "lod_level":
-                    message.lod_level = reader.int32();
+                case "legacy_lod_level":
+                    message.legacy_lod_level = reader.int32();
                     break;
                 default:
                     reader.field(tag, message);
@@ -1063,23 +1044,20 @@ paddle.framework.proto.VarType.LoDTensorDesc = class LoDTensorDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "tensor")) {
-            throw new Error("Excepted 'tensor'.");
+            throw new Error("Expected 'tensor'.");
         }
         return message;
     }
 };
 
-paddle.framework.proto.VarType.LoDTensorDesc.prototype.tensor = null;
-paddle.framework.proto.VarType.LoDTensorDesc.prototype.lod_level = 0;
+paddle.framework.proto.VarType.DenseTensorDesc.prototype.tensor = null;
+paddle.framework.proto.VarType.DenseTensorDesc.prototype.legacy_lod_level = 0;
 
-paddle.framework.proto.VarType.LoDTensorArrayDesc = class LoDTensorArrayDesc {
-
-    constructor() {
-    }
+paddle.framework.proto.VarType.DenseTensorArrayDesc = class DenseTensorArrayDesc {
 
     static decode(reader, length) {
-        const message = new paddle.framework.proto.VarType.LoDTensorArrayDesc();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const message = new paddle.framework.proto.VarType.DenseTensorArrayDesc();
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -1087,7 +1065,7 @@ paddle.framework.proto.VarType.LoDTensorArrayDesc = class LoDTensorArrayDesc {
                     message.tensor = paddle.framework.proto.VarType.TensorDesc.decode(reader, reader.uint32());
                     break;
                 case 2:
-                    message.lod_level = reader.int32();
+                    message.legacy_lod_level = reader.int32();
                     break;
                 default:
                     reader.skipType(tag & 7);
@@ -1095,13 +1073,13 @@ paddle.framework.proto.VarType.LoDTensorArrayDesc = class LoDTensorArrayDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'tensor')) {
-            throw new Error("Excepted 'tensor'.");
+            throw new Error("Expected 'tensor'.");
         }
         return message;
     }
 
     static decodeText(reader) {
-        const message = new paddle.framework.proto.VarType.LoDTensorArrayDesc();
+        const message = new paddle.framework.proto.VarType.DenseTensorArrayDesc();
         reader.start();
         while (!reader.end()) {
             const tag = reader.tag();
@@ -1109,8 +1087,8 @@ paddle.framework.proto.VarType.LoDTensorArrayDesc = class LoDTensorArrayDesc {
                 case "tensor":
                     message.tensor = paddle.framework.proto.VarType.TensorDesc.decodeText(reader);
                     break;
-                case "lod_level":
-                    message.lod_level = reader.int32();
+                case "legacy_lod_level":
+                    message.legacy_lod_level = reader.int32();
                     break;
                 default:
                     reader.field(tag, message);
@@ -1118,29 +1096,29 @@ paddle.framework.proto.VarType.LoDTensorArrayDesc = class LoDTensorArrayDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "tensor")) {
-            throw new Error("Excepted 'tensor'.");
+            throw new Error("Expected 'tensor'.");
         }
         return message;
     }
 };
 
-paddle.framework.proto.VarType.LoDTensorArrayDesc.prototype.tensor = null;
-paddle.framework.proto.VarType.LoDTensorArrayDesc.prototype.lod_level = 0;
+paddle.framework.proto.VarType.DenseTensorArrayDesc.prototype.tensor = null;
+paddle.framework.proto.VarType.DenseTensorArrayDesc.prototype.legacy_lod_level = 0;
 
 paddle.framework.proto.VarType.ReaderDesc = class ReaderDesc {
 
     constructor() {
-        this.lod_tensor = [];
+        this.dense_tensor = [];
     }
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.VarType.ReaderDesc();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
                 case 1:
-                    message.lod_tensor.push(paddle.framework.proto.VarType.LoDTensorDesc.decode(reader, reader.uint32()));
+                    message.dense_tensor.push(paddle.framework.proto.VarType.DenseTensorDesc.decode(reader, reader.uint32()));
                     break;
                 default:
                     reader.skipType(tag & 7);
@@ -1156,8 +1134,8 @@ paddle.framework.proto.VarType.ReaderDesc = class ReaderDesc {
         while (!reader.end()) {
             const tag = reader.tag();
             switch (tag) {
-                case "lod_tensor":
-                    message.lod_tensor.push(paddle.framework.proto.VarType.LoDTensorDesc.decodeText(reader));
+                case "dense_tensor":
+                    message.dense_tensor.push(paddle.framework.proto.VarType.DenseTensorDesc.decodeText(reader));
                     break;
                 default:
                     reader.field(tag, message);
@@ -1176,7 +1154,7 @@ paddle.framework.proto.VarType.Tuple = class Tuple {
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.VarType.Tuple();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -1217,7 +1195,7 @@ paddle.framework.proto.VarDesc = class VarDesc {
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.VarDesc();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -1248,10 +1226,10 @@ paddle.framework.proto.VarDesc = class VarDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'name')) {
-            throw new Error("Excepted 'name'.");
+            throw new Error("Expected 'name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'type')) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -1289,10 +1267,10 @@ paddle.framework.proto.VarDesc = class VarDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "name")) {
-            throw new Error("Excepted 'name'.");
+            throw new Error("Expected 'name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, "type")) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -1313,7 +1291,7 @@ paddle.framework.proto.VarDesc.Attr = class Attr {
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.VarDesc.Attr();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -1338,10 +1316,10 @@ paddle.framework.proto.VarDesc.Attr = class Attr {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'name')) {
-            throw new Error("Excepted 'name'.");
+            throw new Error("Expected 'name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'type')) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -1373,10 +1351,10 @@ paddle.framework.proto.VarDesc.Attr = class Attr {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "name")) {
-            throw new Error("Excepted 'name'.");
+            throw new Error("Expected 'name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, "type")) {
-            throw new Error("Excepted 'type'.");
+            throw new Error("Expected 'type'.");
         }
         return message;
     }
@@ -1396,7 +1374,7 @@ paddle.framework.proto.BlockDesc = class BlockDesc {
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.BlockDesc();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -1421,10 +1399,10 @@ paddle.framework.proto.BlockDesc = class BlockDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'idx')) {
-            throw new Error("Excepted 'idx'.");
+            throw new Error("Expected 'idx'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'parent_idx')) {
-            throw new Error("Excepted 'parent_idx'.");
+            throw new Error("Expected 'parent_idx'.");
         }
         return message;
     }
@@ -1456,10 +1434,10 @@ paddle.framework.proto.BlockDesc = class BlockDesc {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "idx")) {
-            throw new Error("Excepted 'idx'.");
+            throw new Error("Expected 'idx'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, "parent_idx")) {
-            throw new Error("Excepted 'parent_idx'.");
+            throw new Error("Expected 'parent_idx'.");
         }
         return message;
     }
@@ -1471,12 +1449,9 @@ paddle.framework.proto.BlockDesc.prototype.forward_block_idx = -1;
 
 paddle.framework.proto.OpVersion = class OpVersion {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new paddle.framework.proto.OpVersion();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -1489,7 +1464,7 @@ paddle.framework.proto.OpVersion = class OpVersion {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'version')) {
-            throw new Error("Excepted 'version'.");
+            throw new Error("Expected 'version'.");
         }
         return message;
     }
@@ -1509,7 +1484,7 @@ paddle.framework.proto.OpVersion = class OpVersion {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "version")) {
-            throw new Error("Excepted 'version'.");
+            throw new Error("Expected 'version'.");
         }
         return message;
     }
@@ -1525,7 +1500,7 @@ paddle.framework.proto.OpVersionMap = class OpVersionMap {
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.OpVersionMap();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -1560,12 +1535,9 @@ paddle.framework.proto.OpVersionMap = class OpVersionMap {
 
 paddle.framework.proto.OpVersionMap.OpVersionPair = class OpVersionPair {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new paddle.framework.proto.OpVersionMap.OpVersionPair();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -1581,10 +1553,10 @@ paddle.framework.proto.OpVersionMap.OpVersionPair = class OpVersionPair {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'op_name')) {
-            throw new Error("Excepted 'op_name'.");
+            throw new Error("Expected 'op_name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, 'op_version')) {
-            throw new Error("Excepted 'op_version'.");
+            throw new Error("Expected 'op_version'.");
         }
         return message;
     }
@@ -1607,10 +1579,10 @@ paddle.framework.proto.OpVersionMap.OpVersionPair = class OpVersionPair {
             }
         }
         if (!Object.prototype.hasOwnProperty.call(message, "op_name")) {
-            throw new Error("Excepted 'op_name'.");
+            throw new Error("Expected 'op_name'.");
         }
         if (!Object.prototype.hasOwnProperty.call(message, "op_version")) {
-            throw new Error("Excepted 'op_version'.");
+            throw new Error("Expected 'op_version'.");
         }
         return message;
     }
@@ -1627,7 +1599,7 @@ paddle.framework.proto.ProgramDesc = class ProgramDesc {
 
     static decode(reader, length) {
         const message = new paddle.framework.proto.ProgramDesc();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {

@@ -15,17 +15,22 @@ flatbuffers.BinaryReader = class {
             if (reader.root > 0 && reader.root < reader.length) {
                 const buffer = reader.read(offset + 4, 4);
                 reader.identifier = buffer.every((c) => c >= 32 && c <= 128) ? String.fromCharCode(...buffer) : '';
-                const start = reader.root - reader.int32(reader.root);
-                if (start > 0 && (start + 4) < reader.length) {
-                    const last = reader.int16(start) + start;
-                    if (last < reader.length) {
-                        const max = reader.int16(start + 2);
-                        const offsets = [];
-                        for (let i = start + 4; i < last; i += 2) {
-                            const offset = reader.int16(i);
-                            offsets.push(offset);
+                const vtable = reader.int32(reader.root);
+                if (vtable < 0 || (vtable > 4 && vtable < 1024)) {
+                    const start = reader.root - vtable;
+                    if (start > 0 && (start + 4) < reader.length) {
+                        const last = reader.int16(start) + start;
+                        if (last < reader.length) {
+                            const max = reader.int16(start + 2);
+                            if (max > 0 && (max & 1) === 0) {
+                                const offsets = [];
+                                for (let i = start + 4; i < last; i += 2) {
+                                    const offset = reader.int16(i);
+                                    offsets.push(offset);
+                                }
+                                value = max > Math.max(...offsets);
+                            }
                         }
-                        value = max > Math.max(...offsets);
                     }
                 }
             }
@@ -111,7 +116,7 @@ flatbuffers.BinaryReader = class {
         }
         let text = '';
         for (let i = 0; i < length;) {
-            let codePoint;
+            let codePoint = 0;
             const a = this.uint8(offset + i++);
             if (a < 0xC0) {
                 codePoint = a;
@@ -201,24 +206,24 @@ flatbuffers.BinaryReader = class {
         return [];
     }
 
-    struct(position, offset, decode) {
+    struct(position, offset, type) {
         offset = this.__offset(position, offset);
-        return offset ? decode(this, position + offset) : null;
+        return offset ? type.decode(this, position + offset) : null;
     }
 
-    table(position, offset, decode) {
+    table(position, offset, type) {
         offset = this.__offset(position, offset);
-        return offset ? decode(this, this.__indirect(position + offset)) : null;
+        return offset ? type.decode(this, this.__indirect(position + offset)) : null;
     }
 
-    union(position, offset, decode) {
+    union(position, offset, type) {
         const type_offset = this.__offset(position, offset);
-        const type = type_offset ? this.uint8(position + type_offset) : 0;
+        const union_type = type_offset ? this.uint8(position + type_offset) : 0;
         offset = this.__offset(position, offset + 2);
-        return offset ? decode(this, this.__union(position + offset), type) : null;
+        return offset ? type.decode(this, this.__union(position + offset), union_type) : null;
     }
 
-    typedArray(position, offset, type) {
+    array(position, offset, type) {
         offset = this.__offset(position, offset);
         if (offset) {
             const length = this.__vector_len(position + offset);
@@ -229,26 +234,26 @@ flatbuffers.BinaryReader = class {
         return new type(0);
     }
 
-    unionArray(/* position, offset, decode */) {
+    unions(/* position, offset, decode */) {
         return new flatbuffers.Error('Not implemented.');
     }
 
-    structArray(position, offset, decode) {
+    structs(position, offset, type) {
         offset = this.__offset(position, offset);
         const length = offset ? this.__vector_len(position + offset) : 0;
         const list = new Array(length);
         for (let i = 0; i < length; i++) {
-            list[i] = decode(this, this.__vector(position + offset) + i * 8);
+            list[i] = type.decode(this, this.__vector(position + offset) + i * 8);
         }
         return list;
     }
 
-    tableArray(position, offset, decode) {
+    tables(position, offset, type) {
         offset = this.__offset(position, offset);
         const length = offset ? this.__vector_len(position + offset) : 0;
         const list = new Array(length);
         for (let i = 0; i < length; i++) {
-            list[i] = decode(this, this.__indirect(this.__vector(position + offset) + i * 4));
+            list[i] = type.decode(this, this.__indirect(this.__vector(position + offset) + i * 4));
         }
         return list;
     }
@@ -352,7 +357,7 @@ flatbuffers.StreamReader = class extends flatbuffers.BinaryReader {
 
     uint8(offset) {
         const position = this._fill(offset, 1);
-        return this._view.getInt8(position);
+        return this._view.getUint8(position);
     }
 
     int16(offset) {
@@ -462,54 +467,42 @@ flatbuffers.TextReader = class {
     }
 
     int64(obj, defaultValue) {
-        return obj !== undefined ? BigInt(obj) : defaultValue;
+        return obj === undefined ? defaultValue : BigInt(obj);
     }
 
     uint64(obj, defaultValue) {
-        return obj !== undefined ? BigInt(obj) : defaultValue;
+        return obj === undefined ? defaultValue : BigInt(obj);
     }
 
     value(obj, defaultValue) {
-        return obj !== undefined ? obj : defaultValue;
+        return obj === undefined ? defaultValue : obj;
     }
 
-    object(obj, decode) {
-        return obj !== undefined ? decode(this, obj) : obj;
+    object(obj, type) {
+        return obj === undefined ? obj : type.decodeText(this, obj);
     }
 
-    array(obj) {
+    array(obj, type) {
+        type = type || Array;
         if (Array.isArray(obj)) {
-            const target = new Array(obj.length);
-            for (let i = 0; i < obj.length; i++) {
+            const length = obj.length;
+            const target = new type(length);
+            for (let i = 0; i < length; i++) {
                 target[i] = obj[i];
             }
             return target;
         }
-        if (!obj) {
-            return [];
+        if (obj) {
+            throw new flatbuffers.Error('Inalid value array.');
         }
-        throw new flatbuffers.Error('Inalid value array.');
+        return new type(0);
     }
 
-    typedArray(obj, type) {
-        if (Array.isArray(obj)) {
-            const target = new type(obj.length);
-            for (let i = 0; i < obj.length; i++) {
-                target[i] = obj[i];
-            }
-            return target;
-        }
-        if (!obj) {
-            return new type(0);
-        }
-        throw new flatbuffers.Error('Inalid typed array.');
-    }
-
-    objectArray(obj, decode) {
+    objects(obj, type) {
         if (Array.isArray(obj)) {
             const target = new Array(obj.length);
             for (let i = 0; i < obj.length; i++) {
-                target[i] = decode(this, obj[i]);
+                target[i] = type.decodeText(this, obj[i]);
             }
             return target;
         }

@@ -1,25 +1,25 @@
 
-import * as text from './text.js';
 import * as flatbuffers from './flatbuffers.js';
+import * as text from './text.js';
 
 const dlc = {};
 
 dlc.ModelFactory = class {
 
-    match(context) {
-        const container = dlc.Container.open(context);
+    async match(context) {
+        const container = await dlc.Container.open(context);
         if (container) {
-            context.type = 'dlc';
-            context.target = container;
+            return context.set('dlc', container);
         }
+        return null;
     }
 
     async open(context) {
         dlc.schema = await context.require('./dlc-schema');
         dlc.schema = dlc.schema.dlc;
-        await context.target.read();
+        await context.value.read();
         const metadata = await context.metadata('dlc-metadata.json');
-        return new dlc.Model(metadata, context.target);
+        return new dlc.Model(metadata, context.value);
     }
 };
 
@@ -41,6 +41,10 @@ dlc.Model = class {
                     this.source = version ? `${source} v${version}` : source;
                 }
             }
+            const license = target.metadata.get('model-copyright');
+            if (license && license !== 'N/A') {
+                this.metadata.push(new dlc.Argument('license', license));
+            }
         }
         for (const graph of target.graphs) {
             this.graphs = [new dlc.Graph(metadata, target.version, graph)];
@@ -55,7 +59,7 @@ dlc.Graph = class {
         this.inputs = [];
         this.outputs = [];
         const values = new Map();
-        switch (version) {
+        switch (version.major) {
             case 3: {
                 for (const node of graph.nodes) {
                     for (const name of node.inputs) {
@@ -98,7 +102,7 @@ dlc.Graph = class {
         }
         for (const [name, tensor] of values) {
             const type = tensor.shape ? new dlc.TensorType(tensor.dtype, tensor.shape) : null;
-            const initializer = tensor.data && tensor.data ? new dlc.Tensor(type, tensor.data) : null;
+            const initializer = tensor.data && tensor.data ? new dlc.Tensor(tensor.name, type, tensor.data) : null;
             const value = new dlc.Value(name, type, initializer);
             values.set(name, value);
         }
@@ -121,9 +125,10 @@ dlc.Graph = class {
 
 dlc.Argument = class {
 
-    constructor(name, value) {
+    constructor(name, value, type) {
         this.name = name;
         this.value = value;
+        this.type = type || null;
     }
 };
 
@@ -141,16 +146,14 @@ dlc.Value = class {
 
 dlc.Node = class {
 
-    constructor(metadata, version, node, value) {
-        const type = `${node.type}:v${version}`;
-        this.type = Object.assign({}, metadata.type(type));
-        this.type.name = node.type;
-        this.name = node.name;
+    constructor(metadata, version, obj, value) {
+        this.type = metadata.type(obj.type);
+        this.name = obj.name;
         this.inputs = [];
         this.outputs = [];
         this.attributes = [];
-        const inputs = Array.isArray(node.inputs) ? Array.from(node.inputs).map((input) => value(input)) : [];
-        if (Array.isArray(this.type.inputs) && inputs.length === this.type.inputs.length) {
+        const inputs = Array.isArray(obj.inputs) ? Array.from(obj.inputs).map((name) => value(name)) : [];
+        if (version !== 3 && Array.isArray(this.type.inputs) && inputs.length === this.type.inputs.length) {
             for (let i = 0; i < inputs.length; i++) {
                 const argument = new dlc.Argument(this.type.inputs[i].name, [inputs[i]]);
                 this.inputs.push(argument);
@@ -159,7 +162,7 @@ dlc.Node = class {
             const argument = new dlc.Argument(inputs.length === 1 ? 'input' : 'inputs', inputs);
             this.inputs.push(argument);
         }
-        const outputs = Array.isArray(node.outputs) ? Array.from(node.outputs).map((output) => value(output)) : [];
+        const outputs = Array.isArray(obj.outputs) ? Array.from(obj.outputs).map((name) => value(name)) : [];
         if (Array.isArray(this.type.outputs) && outputs.length === this.type.outputs.length) {
             for (let i = 0; i < outputs.length; i++) {
                 const argument = new dlc.Argument(this.type.outputs[i].name, [outputs[i]]);
@@ -169,45 +172,38 @@ dlc.Node = class {
             const argument = new dlc.Argument(outputs.length === 1 ? 'output' : 'outputs', outputs);
             this.outputs.push(argument);
         }
-        if (node.attributes) {
-            for (const attr of node.attributes) {
+        if (obj.attributes) {
+            for (const attr of obj.attributes) {
                 if (attr.name === 'OutputDims') {
                     continue;
                 }
-                const attribute = new dlc.Attribute(metadata.attribute(type, attr.name), version, attr);
+                const schema = metadata.attribute(obj.type, attr.name);
+                let type = attr.type;
+                switch (type) {
+                    case 'tensor': {
+                        const tensor = attr.data;
+                        const type = new dlc.TensorType(tensor.dtype, tensor.shape);
+                        value = new dlc.Tensor(tensor.name, type, tensor.data);
+                        break;
+                    }
+                    default: {
+                        value = attr.data;
+                    }
+                }
+                if (schema && schema.type) {
+                    type = schema.type;
+                    value = dlc.Utility.enum(version, type, value);
+                }
+                const attribute = new dlc.Argument(attr.name, value, type);
                 this.attributes.push(attribute);
             }
         }
-        if (node.weights) {
-            for (const tensor of node.weights) {
+        if (obj.weights) {
+            for (const tensor of obj.weights) {
                 const type = new dlc.TensorType(tensor.data.dtype, tensor.shape);
-                const value = new dlc.Value('', type, new dlc.Tensor(type, tensor.data));
+                const value = new dlc.Value('', type, new dlc.Tensor(tensor.name, type, tensor.data));
                 this.inputs.push(new dlc.Argument(tensor.name, [value]));
             }
-        }
-    }
-};
-
-dlc.Attribute = class {
-
-    constructor(metadata, version, attribute) {
-        this.name = attribute.name;
-        this.type = attribute.type;
-        switch (this.type) {
-            case 'tensor': {
-                const tensor = attribute.data;
-                const type = new dlc.TensorType(tensor.dtype, tensor.shape);
-                const data = tensor.data;
-                this.value = new dlc.Tensor(type, data);
-                break;
-            }
-            default: {
-                this.value = attribute.data;
-            }
-        }
-        if (metadata && metadata.type) {
-            this.type = metadata.type;
-            this.value = dlc.Utility.enum(version, this.type, this.value);
         }
     }
 };
@@ -240,7 +236,8 @@ dlc.TensorShape = class {
 
 dlc.Tensor = class {
 
-    constructor(type, data) {
+    constructor(name, type, data) {
+        this.name = name;
         this.type = type;
         if (data instanceof Uint8Array) {
             this.encoding = '<';
@@ -258,17 +255,32 @@ dlc.Tensor = class {
 
 dlc.Container = class {
 
-    static open(context) {
-        const entries = context.peek('zip');
-        if (entries instanceof Map && (entries.has('model') || entries.has('model.params'))) {
-            return new dlc.Container(context, entries.get('model'), entries.get('model.params'), entries.get('dlc.metadata'));
+    static async open(context) {
+        const entries = await context.peek('zip');
+        if (entries instanceof Map) {
+            const model = entries.get('model');
+            const params = entries.get('model.params');
+            const metadata = entries.get('dlc.metadata');
+            if (model) {
+                const signature = dlc.Container._signature(model);
+                if (signature && (signature.identifier === 'NETD' || signature.major === 2)) {
+                    return new dlc.Container(context, model, params, metadata);
+                }
+            }
+            if (params) {
+                const signature = dlc.Container._signature(params);
+                if (signature && signature.identifier === 'NETP') {
+                    return new dlc.Container(context, model, params, metadata);
+                }
+            }
+            return null;
         }
         const stream = context.stream;
-        switch (dlc.Container._signature(stream).split('.').pop()) {
+        const signature = dlc.Container._signature(stream);
+        switch (signature.identifier) {
             case 'NETD':
                 return new dlc.Container(context, stream, undefined, undefined);
             case 'NETP':
-                return new dlc.Container(context, undefined, stream, undefined);
             case 'NR64':
                 return new dlc.Container(context, undefined, stream, undefined);
             default:
@@ -301,27 +313,19 @@ dlc.Container = class {
             const stream = this._model;
             delete this._model;
             const signature = dlc.Container._signature(stream);
-            switch (signature) {
-                case '2': {
-                    throw new dlc.Error("File contains undocumented DLC v2 data.");
-                }
-                case '3.NETD':
-                case 'NETD': {
-                    this.version = 3;
-                    this.graph = dlc.Container._model3(stream, signature);
-                    this.graphs = [this.graph];
-                    break;
-                }
-                case '4.NETD': {
-                    this.version = 4;
-                    this.graphs = dlc.Container._model4(stream);
-                    break;
-                }
-                default: {
-                    const buffer = stream.peek(Math.min(stream.length, 16));
-                    const content = Array.from(buffer).map((c) => (c < 16 ? '0' : '') + c.toString(16)).join('');
-                    throw new dlc.Error(`File contains undocumented '${content}' data.`);
-                }
+            if (signature.major === 2) {
+                throw new dlc.Error("File contains undocumented DLC v2 data.");
+            } else if (signature.identifier === 'NETD' && (signature.major === 3 || signature.major === undefined)) {
+                this.version = { major: signature.major || 3, minor: signature.minor || 0 };
+                this.graph = dlc.Container._model3(stream, signature.offset);
+                this.graphs = [this.graph];
+            } else if (signature.identifier === 'NETD' && signature.major === 4) {
+                this.version = { major: signature.major, minor: signature.minor };
+                this.graphs = dlc.Container._model4(stream);
+            } else {
+                const buffer = stream.peek(Math.min(stream.length, 16));
+                const content = Array.from(buffer).map((c) => (c < 16 ? '0' : '') + c.toString(16)).join('');
+                throw new dlc.Error(`File contains undocumented '${content}' data.`);
             }
         }
         if (this._params) {
@@ -329,27 +333,18 @@ dlc.Container = class {
             const stream = this._params;
             delete this._params;
             const signature = dlc.Container._signature(stream);
-            switch (signature) {
-                case '2': {
-                    throw new dlc.Error("File contains undocumented DLC v2 data.");
-                }
-                case '3.NETP':
-                case 'NETP': {
-                    this.version = this.graphs.length > 0 ? this.version : 3;
-                    this.graph = dlc.Container._params3(stream, signature, this.graph);
-                    this.graphs = [this.graph];
-                    break;
-                }
-                case '4.NETP':
-                case '4.NR64': {
-                    dlc.Container._params4(stream, this.graphs, signature);
-                    break;
-                }
-                default: {
-                    const buffer = stream.peek(Math.min(stream.length, 16));
-                    const content = Array.from(buffer).map((c) => (c < 16 ? '0' : '') + c.toString(16)).join('');
-                    throw new dlc.Error(`File contains undocumented '${content}' data.`);
-                }
+            if (signature.major === 2) {
+                throw new dlc.Error("File contains undocumented DLC v2 data.");
+            } else if (signature.identifier === 'NETP' && (signature.major === 3 || signature.major === undefined)) {
+                this.version = this.graphs.length > 0 ? this.version : { major: signature.major || 3, minor: signature.minor || 0 };
+                this.graph = dlc.Container._params3(stream, signature, this.graph);
+                this.graphs = [this.graph];
+            } else if ((signature.identifier === 'NETP' || signature.identifier === 'NR64') && signature.major === 4) {
+                dlc.Container._params4(stream, this.graphs, signature);
+            } else {
+                const buffer = stream.peek(Math.min(stream.length, 16));
+                const content = Array.from(buffer).map((c) => (c < 16 ? '0' : '') + c.toString(16)).join('');
+                throw new dlc.Error(`File contains undocumented '${content}' data.`);
             }
         }
         if (this._metadata) {
@@ -357,7 +352,7 @@ dlc.Container = class {
             delete this._metadata;
             const reader = text.Reader.open(stream);
             for (;;) {
-                const line = reader.read();
+                const line = reader.read('\n');
                 if (line === undefined) {
                     break;
                 }
@@ -372,10 +367,10 @@ dlc.Container = class {
         }
     }
 
-    static _model3(stream, signature) {
+    static _model3(stream, offset) {
         let model = null;
         try {
-            const buffer = new Uint8Array(signature === 'NETD' ? stream.peek() : stream.peek().subarray(8));
+            const buffer = new Uint8Array(offset > 0 ? stream.peek().subarray(offset) : stream.peek());
             const reader = flatbuffers.BinaryReader.open(buffer);
             model = dlc.schema.v3.Model.decode(reader, reader.root);
         } catch (error) {
@@ -435,17 +430,24 @@ dlc.Container = class {
                 case 0x0008: return 'int8';
                 case 0x0016: return 'int16';
                 case 0x0032: return 'int32';
-                case 0x0108: return 'int8';
-                case 0x0132: return 'int32';
+                case 0x0064: return 'int64';
+                case 0x0108: return 'uint8';
+                case 0x0116: return 'uint16';
+                case 0x0132: return 'uint32';
+                case 0x0164: return 'uint64';
                 case 0x0216: return 'float16';
                 case 0x0232: return 'float32';
+                case 0x0304: return 'qint4';
                 case 0x0308: return 'qint8';
                 case 0x0316: return 'qint16';
                 case 0x0332: return 'qint32';
-                case 0x0408: return 'uint8';
-                case 0x0416: return 'uint16';
-                case 0x0432: return 'uint32';
+                case 0x0404: return 'quint4';
+                case 0x0408: return 'quint8';
+                case 0x0416: return 'quint16';
+                case 0x0432: return 'quint32';
                 case 0x0508: return 'boolean';
+                case 0x0608: return 'string';
+                case 0x7fffffff: return 'undefined';
                 default: throw new dlc.Error(`Unsupported data type '${JSON.stringify(value)}'.`);
             }
         };
@@ -482,6 +484,10 @@ dlc.Container = class {
                                 case 0x0508:
                                     attribute.data = value.int32_value !== 0;
                                     attribute.type = 'boolean';
+                                    break;
+                                case 0x0608:
+                                    attribute.data = value.string_value;
+                                    attribute.type = 'string';
                                     break;
                                 default:
                                     throw new dlc.Error(`Unknown attribute value kind '${value.kind}'.`);
@@ -557,7 +563,7 @@ dlc.Container = class {
     static _params4(stream, graphs, signature) {
         let buffer = stream.peek().subarray(8);
         let buffers = null;
-        if (signature === '4.NR64') {
+        if (signature.major === 4 && signature.identifier === 'NR64') {
             try {
                 const reader = flatbuffers.BinaryReader.open(buffer);
                 const nr64 = dlc.schema.v4.ModelParameters64.decode(reader, reader.root);
@@ -587,7 +593,13 @@ dlc.Container = class {
             graph.tensors.sort((a, b) => a.name.localeCompare(b.name));
             for (const tensor of graph.tensors) {
                 if (tensor.location === 4) {
-                    tensor.data = buffers ? buffers[index++].bytes : tensors.get(tensor.name).bytes;
+                    if (buffers && index < buffers.length) {
+                        tensor.data = buffers[index++].bytes;
+                    } else if (tensors.has(tensor.name)) {
+                        tensor.data = tensors.get(tensor.name).bytes;
+                    } else {
+                        throw new dlc.Error(`Unknown tensor `);
+                    }
                 }
             }
             for (let i = 0; i < graph.nodes.length; i++) {
@@ -596,7 +608,13 @@ dlc.Container = class {
                 for (const attribute of node.attributes) {
                     const tensor = attribute.tensor;
                     if (tensor) {
-                        tensor.data = buffers ? buffers[index++].bytes : tensors.get(tensor.name).bytes;
+                        if (buffers && index < buffers.length) {
+                            tensor.data = buffers[index++].bytes;
+                        } else if (tensors.has(tensor.name)) {
+                            tensor.data = tensors.get(tensor.name).bytes;
+                        } else {
+                            throw new dlc.Error(`Unknown tensor `);
+                        }
                     }
                 }
             }
@@ -607,36 +625,37 @@ dlc.Container = class {
         try {
             const context = await this.context.fetch(name);
             return context.stream;
-        } catch (error) {
+        } catch {
             return null;
         }
     }
 
     static _signature(stream) {
+        const signature = {};
+        signature.identifier = '?';
+        signature.offset = 0;
         if (stream) {
             const buffer = stream.peek(Math.min(stream.length, 16));
-            const match = (signature) => buffer.length >= signature.length && signature.every((value, index) => value === buffer[index]);
-            if (match([0xD5, 0x0A, 0x04, 0x00, 0x00, 0x00, 0x00, 0x00]) && buffer.length >= 16) {
-                const reader = flatbuffers.BinaryReader.open(stream, 8);
-                if (reader) {
-                    return `4.${reader.identifier}`;
+            if (buffer[0] === 0xD5 && buffer[1] === 0x0A) {
+                delete signature.identifier;
+                if (buffer[3] === 0x00 && buffer[5] === 0x00 && buffer[5] === 0x00 && buffer[6] === 0x00) {
+                    signature.major = buffer[2] | buffer[3] << 8;
+                    signature.minor = buffer[4] | buffer[5] << 8;
+                    if (signature.major > 2) {
+                        signature.identifier = '?';
+                    }
                 }
             }
-            if (match([0xD5, 0x0A, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]) && buffer.length >= 16) {
-                const reader = flatbuffers.BinaryReader.open(stream, 8);
+            if (signature.identifier === '?') {
+                const offset = signature.major === undefined ? 0 : 8;
+                const reader = flatbuffers.BinaryReader.open(stream, offset);
                 if (reader) {
-                    return `3.${reader.identifier}`;
+                    signature.identifier = reader.identifier;
+                    signature.offset = offset;
                 }
-            }
-            if (match([0xD5, 0x0A, 0x02, 0x00])) {
-                return '2';
-            }
-            const reader = flatbuffers.BinaryReader.open(stream);
-            if (reader) {
-                return reader.identifier;
             }
         }
-        return '';
+        return signature;
     }
 };
 

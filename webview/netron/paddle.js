@@ -8,46 +8,42 @@ const paddle = {};
 
 paddle.ModelFactory = class {
 
-    match(context) {
+    async match(context) {
         const identifier = context.identifier;
-        const extension = identifier.split('.').pop().toLowerCase();
+        const extension = identifier.lastIndexOf('.') > 0 ? identifier.split('.').pop().toLowerCase() : '';
         if (identifier === '__model__' || extension === '__model__' || extension === 'paddle' || extension === 'pdmodel') {
-            const tags = context.tags('pb');
+            const tags = await context.tags('pb');
             if (tags.get(1) === 2) {
-                context.type = 'paddle.pb';
-                return;
+                return context.set('paddle.pb');
             }
         }
         if (extension === 'pbtxt' || extension === 'txt') {
-            const tags = context.tags('pbtxt');
+            const tags = await context.tags('pbtxt');
             if (tags.has('blocks')) {
-                context.type = 'paddle.pbtxt';
-                return;
+                return context.set('paddle.pbtxt');
             }
         }
         const stream = context.stream;
         if (stream && stream.length > 16 && stream.peek(16).every((value) => value === 0x00)) {
-            context.type = 'paddle.params';
-            return;
+            return context.set('paddle.params');
         }
-        const pickle = paddle.Pickle.open(context);
+        const pickle = await paddle.Pickle.open(context);
         if (pickle) {
-            context.target = pickle;
-            context.type = context.target.name;
-            return;
+            return context.set(pickle.name, pickle);
         }
-        const entries = paddle.Entries.open(context);
+        const entries = await paddle.Entries.open(context);
         if (entries) {
-            context.target = entries;
-            context.type = context.target.name;
-            return;
+            return context.set(entries.name, entries);
         }
-        const naive = paddle.NaiveBuffer.open(context);
+        const naive = await paddle.NaiveBuffer.open(context);
         if (naive) {
-            context.target = naive;
-            context.type = context.target.name;
-            return;
+            return context.set(naive.name, naive);
         }
+        const obj = await context.peek('json');
+        if (obj && obj.base_code && obj.program) {
+            return context.set('paddle.ir', obj);
+        }
+        return null;
     }
 
     filter(context, type) {
@@ -68,9 +64,14 @@ paddle.ModelFactory = class {
             case 'paddle.naive.param': {
                 paddle.schema = await context.require('./paddle-schema');
                 paddle.schema = paddle.schema.paddle.lite.fbs.proto;
-                const target = context.target;
+                const target = context.value;
                 target.read();
                 return new paddle.Model(metadata, target.format, target.model, target.weights);
+            }
+            case 'paddle.ir': {
+                const ir = new paddle.IR(context.value);
+                const format = `PaddlePaddle IR v${ir.version}`;
+                return new paddle.Model(metadata, format, ir.desc, ir.tensors);
             }
             default: {
                 paddle.proto = await context.require('./paddle-proto');
@@ -79,12 +80,31 @@ paddle.ModelFactory = class {
                 const parts = identifier.split('.');
                 const extension = parts.pop().toLowerCase();
                 const base = parts.join('.');
-                const openProgram = (context, type) => {
+                const openProgram = async (context, type) => {
                     const program = {};
                     switch (type) {
                         case 'paddle.pbtxt': {
                             try {
-                                const reader = context.read('protobuf.text');
+                                const reader = await context.read('protobuf.text');
+                                reader.enum = function(type) {
+                                    const token = this.token();
+                                    this.next();
+                                    this.semicolon();
+                                    if (type[token] !== undefined) {
+                                        return type[token];
+                                    }
+                                    if (token === 'LOD_TENSOR') {
+                                        return type.DENSE_TENSOR;
+                                    }
+                                    throw new paddle.Error(`Unknown enum value '${token}' ${this.location()}`);
+                                };
+                                reader.field = function(tag, message) {
+                                    if (message instanceof paddle.proto.VarType && tag === 'lod_tensor') {
+                                        message.dense_tensor = paddle.proto.VarType.DenseTensorDesc.decodeText(reader);
+                                    } else {
+                                        throw new Error(`Unknown field '${tag}' ${this.location()}`);
+                                    }
+                                };
                                 program.desc = paddle.proto.ProgramDesc.decodeText(reader);
                             } catch (error) {
                                 const message = error && error.message ? error.message : error.toString();
@@ -94,7 +114,7 @@ paddle.ModelFactory = class {
                         }
                         case 'paddle.pb': {
                             try {
-                                const reader = context.read('protobuf.binary');
+                                const reader = await context.read('protobuf.binary');
                                 program.desc = paddle.proto.ProgramDesc.decode(reader);
                             } catch (error) {
                                 const message = error && error.message ? error.message : error.toString();
@@ -108,7 +128,7 @@ paddle.ModelFactory = class {
                     }
                     const formatVersion = (version) => {
                         if (version && version.version !== undefined) {
-                            const number = Number(version.version);
+                            const number = version.version.toNumber();
                             if (number > 0) {
                                 const list = [Math.floor(number / 1000000) % 1000, Math.floor(number / 1000) % 1000, number % 1000];
                                 if (list.slice(-1).pop() === 0) {
@@ -164,23 +184,23 @@ paddle.ModelFactory = class {
                 };
                 switch (context.type) {
                     case 'paddle.pickle': {
-                        const target = context.target;
+                        const target = context.value;
                         return new paddle.Model(metadata, target.format, null, target.weights);
                     }
                     case 'paddle.entries': {
-                        const target = context.target;
+                        const target = context.value;
                         target.read();
                         return new paddle.Model(metadata, target.format, null, target.weights);
                     }
                     case 'paddle.params': {
-                        const file = identifier !== 'params' ? `${base}.pdmodel` : 'model';
+                        const file = identifier === 'params' ? 'model' : `${base}.pdmodel`;
                         const params = loadParams(context.stream);
                         try {
                             const content = await context.fetch(file);
-                            const program = openProgram(content, 'paddle.pb');
+                            const program = await openProgram(content, 'paddle.pb');
                             const weights = mapParams(params, program);
                             return new paddle.Model(metadata, program.format, program.desc, weights);
-                        } catch (error) {
+                        } catch {
                             const weights = new Map(params.map((param, index) => [index.toString(), param]));
                             return new paddle.Model(metadata, 'PaddlePaddle Inference Weights', null, weights);
                         }
@@ -201,7 +221,7 @@ paddle.ModelFactory = class {
                             const container = new paddle.Pickle(obj);
                             return container.weights || new Map();
                         };
-                        const program = openProgram(context, context.type);
+                        const program = await openProgram(context, context.type);
                         if (extension === 'pdmodel') {
                             try {
                                 const name = `${base}.pdiparams`;
@@ -209,7 +229,7 @@ paddle.ModelFactory = class {
                                 const params = loadParams(content.stream);
                                 const weights = mapParams(params, program);
                                 return new paddle.Model(metadata, program.format, program.desc, weights);
-                            } catch (error) {
+                            } catch {
                                 try {
                                     const name = `${base}.pdparams`;
                                     const content = await context.fetch(name);
@@ -223,16 +243,16 @@ paddle.ModelFactory = class {
                                             }
                                         }
                                         return new paddle.Model(metadata, program.format, program.desc, weights);
-                                    } catch (error) {
+                                    } catch {
                                         return new paddle.Model(metadata, program.format, program.desc, weights);
                                     }
-                                } catch (error) {
+                                } catch {
                                     try {
                                         const name = `${base}.pdopt`;
                                         const content = await context.fetch(name);
                                         const weights = openNumPyArrayPickle(content.stream);
                                         return new paddle.Model(metadata, program.format, program.desc, weights);
-                                    } catch (error) {
+                                    } catch {
                                         return loadEntries(context, program);
                                     }
                                 }
@@ -244,7 +264,7 @@ paddle.ModelFactory = class {
                                 const params = loadParams(content.stream);
                                 const weights = mapParams(params, program);
                                 return new paddle.Model(metadata, program.format, program.desc, weights);
-                            } catch (error) {
+                            } catch {
                                 return loadEntries(context, program);
                             }
                         }
@@ -277,8 +297,16 @@ paddle.Graph = class {
         if (block) {
             this.name = block.idx.toString();
             const values = new Map();
+            if (block.kind === 'block') {
+                for (const [name, input] of block.argInputs) {
+                    const [parameter, tensorType] = input;
+                    const value = new paddle.Value(name, tensorType, null, null);
+                    values.set(name, value);
+                    this.inputs.push(new paddle.Argument(parameter, [value]));
+                }
+            }
             for (const variable of block.vars) {
-                const type = variable.type && variable.type.type && variable.type.lod_tensor && variable.type.lod_tensor.tensor ? paddle.Utility.createTensorType(variable.type.lod_tensor.tensor.data_type, variable.type.lod_tensor.tensor.dims) : null;
+                const type = variable.type && variable.type.type && variable.type.dense_tensor && variable.type.dense_tensor.tensor ? paddle.Utility.createTensorType(variable.type.dense_tensor.tensor.data_type, variable.type.dense_tensor.tensor.dims) : null;
                 const tensor = variable.persistable && variable.type && variable.type.type !== paddle.DataType.FETCH_LIST && variable.type.type !== paddle.DataType.FEED_MINIBATCH ? (tensors.get(variable.name) || new paddle.Tensor(type)) : null;
                 values.set(variable.name, new paddle.Value(variable.name, type, tensor));
             }
@@ -309,6 +337,9 @@ paddle.Graph = class {
                 }
                 for (const output of op.outputs) {
                     for (const name of output.arguments) {
+                        if (output.values && output.values.has(name)) {
+                            values.set(name, output.values.get(name));
+                        }
                         if (!values.has(name)) {
                             values.set(name, new paddle.Value(name, null, null));
                         }
@@ -319,11 +350,21 @@ paddle.Graph = class {
             let lastOutput = null;
             for (const op of block.ops) {
                 if (op.type === 'feed') {
-                    const name = op.attrs.filter((attr) => attr.name === 'col')[0].i.toString();
+                    let name = '';
+                    if (op.kind === 'op') {
+                        name = op.attrs.filter((attr) => attr.name === 'col')[0].irValue.toString();
+                    } else {
+                        name = op.attrs.filter((attr) => attr.name === 'col')[0].i.toString();
+                    }
                     const argument = new paddle.Argument(name, op.outputs[0].arguments.map((id) => values.get(id)));
                     this.inputs.push(argument);
                 } else if (op.type === 'fetch') {
-                    const name = op.attrs.filter((attr) => attr.name === 'col')[0].i.toString();
+                    let name = '';
+                    if (op.kind === 'op') {
+                        name = op.attrs.filter((attr) => attr.name === 'col')[0].irValue.toString();
+                    } else {
+                        name = op.attrs.filter((attr) => attr.name === 'col')[0].i.toString();
+                    }
                     const argument = new paddle.Argument(name, op.inputs[0].arguments.map((id) => values.get(id)));
                     this.outputs.push(argument);
                 } else {
@@ -350,9 +391,9 @@ paddle.Graph = class {
             const ops = new Map();
             for (const [name, tensor] of tensors) {
                 values.set(name, new paddle.Value(name, tensor.type, tensor));
-                const separator = name.indexOf('.') !== -1 ? '.' : '_';
+                const separator = name.indexOf('.') === -1 ? '_' : '.';
                 const regex = /(.*)_((w_attr|scale|weights|offset|b|w|b_attr)_(moment|beta|velocity|mean_square|mean_grad).*)/;
-                let parts;
+                let parts = [];
                 if (separator === '.') {
                     parts = name.split(separator);
                 } else if (regex.test(name)) {
@@ -407,6 +448,8 @@ paddle.Node = class {
         const type = op.type;
         this.type = metadata.type(type) || { name: type };
         this.name = op.name || '';
+        this.description = op.description || '';
+        this.identifier = op.identifier || '';
         this.attributes = [];
         this.inputs = [];
         this.outputs = [];
@@ -464,6 +507,14 @@ paddle.Node = class {
                         break;
                     case paddle.AttributeType.LONGS:
                         type = 'int64[]';
+                        break;
+                    case 1000: // ir
+                        type = attr.irType;
+                        value = attr.irValue;
+                        break;
+                    case 1001: // graph
+                        type = 'graph';
+                        value = new paddle.Graph(metadata, attr.block, attr.vars);
                         break;
                     default:
                         break;
@@ -543,9 +594,11 @@ paddle.Tensor = class {
 
 paddle.TensorType = class {
 
-    constructor(dataType, shape) {
+    constructor(dataType, shape, layout, denotation) {
         this.dataType = dataType;
         this.shape = shape;
+        this.layout = layout;
+        this.denotation = denotation;
     }
 
     toString() {
@@ -558,7 +611,7 @@ paddle.TensorShape = class {
     constructor(dimensions) {
         dimensions = dimensions.map((dim) => typeof dim === 'bigint' ? dim.toNumber() : dim);
         this.dimensions = dimensions.map((dimension) => {
-            return dimension !== -1 ? dimension : '?';
+            return dimension === -1 ? '?' : dimension;
         });
     }
 
@@ -569,9 +622,11 @@ paddle.TensorShape = class {
 
 paddle.Entries = class {
 
-    static open(context) {
-        let entries = context.peek('zip');
-        entries = entries instanceof Map ? entries : context.peek('tar');
+    static async open(context) {
+        let entries = await context.peek('zip');
+        if (entries instanceof Map === false) {
+            entries = await context.peek('tar');
+        }
         if (entries instanceof Map) {
             entries = Array.from(entries);
             entries = new Map(entries.filter(([name]) => !name.endsWith('/') && !name.split('/').pop().startsWith('.')).slice());
@@ -622,8 +677,8 @@ paddle.Entries = class {
 
 paddle.Pickle = class {
 
-    static open(context) {
-        const obj = context.peek('pkl');
+    static async open(context) {
+        const obj = await context.peek('pkl');
         const container = new paddle.Pickle(obj);
         if (container.weights !== null) {
             return container;
@@ -693,7 +748,7 @@ paddle.Pickle = class {
 
 paddle.NaiveBuffer = class {
 
-    static open(context) {
+    static async open(context) {
         const stream = context.stream;
         if (stream && stream.length > 4) {
             const buffer = stream.peek(4);
@@ -723,7 +778,7 @@ paddle.NaiveBuffer = class {
         if (this.meta_version >= 2) {
             reader.skip(2);
         }
-        const decoder = new TextDecoder();
+        const decoder = new TextDecoder('utf-8');
         const opt_version = reader.read(16);
         const version = decoder.decode(opt_version.slice(0, opt_version.indexOf(0x00)));
         this.format = `Paddle Lite${version && version.match(/^v\d+\.\d+.\d+$/) ? ` ${version}` : ''}`;
@@ -784,10 +839,18 @@ paddle.Utility = class {
         if (!paddle.Utility._dataTypes) {
             const length = Math.max.apply(null, Object.entries(paddle.DataType).map(([, value]) => value));
             paddle.Utility._dataTypes = new Array(length);
-            const map = new Map([['bool', 'boolean'], ['bf16', 'bfloat16'], ['fp16', 'float16'], ['fp32', 'float32'], ['fp64', 'float64']]);
+            const types = new Map([
+                ['bool', 'boolean'],
+                ['bf16', 'bfloat16'],
+                ['fp16', 'float16'],
+                ['fp32', 'float32'],
+                ['fp64', 'float64'],
+                ['fp8_e4m3fn', 'float8e4m3fn'],
+                ['fp8_e5m2', 'float8e5m2']
+            ]);
             for (const [name, index] of Object.entries(paddle.DataType)) {
                 const key = name.toLowerCase();
-                paddle.Utility._dataTypes[index] = map.has(key) ? map.get(key) : key;
+                paddle.Utility._dataTypes[index] = types.has(key) ? types.get(key) : key;
             }
         }
         const dataType = data_type < paddle.Utility._dataTypes.length ? paddle.Utility._dataTypes[data_type] : '?';
@@ -803,9 +866,11 @@ paddle.Utility = class {
         const buffer = stream.read(length);
         const reader = protobuf.BinaryReader.open(buffer);
         const tensorDesc = paddle.proto.VarType.TensorDesc.decode(reader);
-        const size = tensorDesc.dims.reduce((a, b) => a * Number(b), 1);
+        const dims = tensorDesc.dims.map((dim) => dim.toNumber());
+        const size = dims.reduce((a, b) => a * b, 1);
         let itemsize = 0;
         switch (tensorDesc.data_type) {
+            case paddle.DataType.BOOL: itemsize = 1; break;
             case paddle.DataType.FP16: itemsize = 2; break;
             case paddle.DataType.FP32: itemsize = 4; break;
             case paddle.DataType.FP64: itemsize = 8; break;
@@ -830,13 +895,13 @@ paddle.DataType = {
     FP16: 4,
     FP32: 5,
     FP64: 6,
-    LOD_TENSOR: 7,
+    DENSE_TENSOR: 7,
     SELECTED_ROWS: 8,
     FEED_MINIBATCH: 9,
     FETCH_LIST: 10,
     STEP_SCOPES: 11,
     LOD_RANK_TABLE: 12,
-    LOD_TENSOR_ARRAY: 13,
+    DENSE_TENSOR_ARRAY: 13,
     PLACE_LIST: 14,
     READER: 15,
     RAW: 17,
@@ -847,6 +912,10 @@ paddle.DataType = {
     BF16: 22,
     COMPLEX64: 23,
     COMPLEX128: 24,
+    STRING: 25,
+    STRINGS: 26,
+    FP8_E4M3FN: 32,
+    FP8_E5M2: 33,
 };
 
 paddle.AttributeType = {
@@ -866,6 +935,470 @@ paddle.AttributeType = {
     VAR: 13,
     VARS: 14,
     FLOAT64: 15
+};
+
+paddle.IR = class {
+
+    constructor(obj) {
+        this._names = new Map();
+        this._crossRegionInputs = new Map();
+        this.base_code = obj.base_code;
+        this.version = obj.base_code.version;
+        const program = obj.program;
+        const regions = [];
+        for (const region of program.regions) {
+            regions.push(this.region(region));
+        }
+        const [programRegion] = regions;
+        this.desc = programRegion;
+        this.tensors = new Map();
+    }
+
+    region(value) {
+        const obj = {};
+        obj.kind = 'region';
+        obj.name = value['#'];
+        obj.idx = value['#'];
+        obj.vars = new Map();
+        obj.blocks = [];
+        for (const block of value.blocks) {
+            obj.blocks.push(this.block(block));
+        }
+        const [block] = obj.blocks;
+        obj.block = block;
+        return obj;
+    }
+
+    block(value) {
+        const obj = {};
+        obj.kind = 'block';
+        obj.name = value['#'];
+        obj.idx = value['#'];
+        obj.vars = new Map();
+        obj.argInputs = new Map();
+        if (value.args) {
+            for (const input of value.args) {
+                const [, type] = input.TT && input.TT['#'] ? input.TT['#'].split('.') : null;
+                if (type === 't_dtensor') {
+                    const [parameter, name,] = this.getParaName(input);
+                    const tensorType = this.createTensorType(input);
+                    obj.argInputs.set(name, [parameter, tensorType]);
+                }
+            }
+        }
+        let inputNames = new Set();
+        let outputNames = new Set();
+        obj.ops = [];
+        for (const op of value.ops) {
+            const irOp = this.op(op);
+            obj.ops.push(irOp);
+            inputNames = new Set([...inputNames, ...irOp.inputNames]);
+            outputNames = new Set([...outputNames, ...irOp.outputNames]);
+        }
+        const missInputs = new Set([...inputNames].filter((item) => !outputNames.has(item)));
+        if (missInputs) {
+            for (const name of missInputs) {
+                const output = this.getCrossInput(name);
+                if (output) {
+                    obj.argInputs.set(name, [output.parameter, output.tensorType]);
+                }
+            }
+        }
+        return obj;
+    }
+
+    op(op) {
+        const obj = {};
+        obj.kind = 'op';
+        const opInfo = this.getOpInfo(op);
+        obj.name = opInfo.fullName;
+        obj.type = opInfo.type;
+        obj.identifier = opInfo.rawType;
+        obj.attrs = [];
+        for (const [idx, value] of Object.entries(op.A)) {
+            obj.attrs.push(this.attr(idx, value, opInfo));
+        }
+        if (op.regions !== undefined) {
+            for (const region of op.regions) {
+                const regionAttr = this.region(region);
+                obj.attrs.push(this.attr(null, regionAttr, null));
+            }
+        }
+        const inputNames = new Set();
+        const outputNames = new Set();
+        const createInput = (input, opInfo) => {
+            const [parameterName, inputName] = this.getParaName(input, opInfo.namePrefix);
+            return { arguments: [inputName], parameter: parameterName };
+        };
+        const inputs = [];
+        if (op.I) {
+            const inputArray = Array.isArray(op.I) ? op.I : [op.I];
+            for (const input of inputArray) {
+                inputs.push(createInput(input, opInfo));
+                const [, name] = this.getParaName(input, opInfo.namePrefix);
+                inputNames.add(name);
+            }
+        }
+        const createOutput = (output, opInfo, idx, outputAttr) => {
+            const [parameterName, outputName] = this.getParaName(output, opInfo.namePrefix);
+            const valuesMap = new Map();
+            let tType = null;
+            const [, typeType] = output.TT['#'].split('.');
+            if (typeType === 't_dtensor') {
+                const denotation = this.getOutputAttr(opInfo, idx, outputAttr);
+                const tensorType = this.createTensorType(output, denotation);
+                valuesMap.set(outputName, new paddle.Value(outputName, tensorType, null));
+                tType = tensorType;
+            } else {
+                valuesMap.set(outputName, new paddle.Value(outputName, null, null, null));
+            }
+            return {
+                arguments: [outputName],
+                parameter: parameterName,
+                tensorType: tType,
+                values: valuesMap
+            };
+        };
+        const outputs = [];
+        if (op.O) {
+            const outputArray = Array.isArray(op.O) ? op.O : [op.O];
+            for (const [idx, output] of Object.entries(outputArray)) {
+                const irOutput = createOutput(output, opInfo, idx, op.OA);
+                outputs.push(irOutput);
+                const [, name, isNegative] = this.getParaName(output, opInfo.namePrefix);
+                outputNames.add(name);
+                if (!isNegative && !this.hasCrossInput(name)) {
+                    this.addCrossInput(name, irOutput);
+                }
+            }
+        }
+        if (op.regions) {
+            const collectRegions = (irReader, regions) => {
+                let inputs = new Map();
+                let outputs = new Map();
+                for (const region of regions) {
+                    for (const block of region.blocks) {
+                        for (const op of block.ops) {
+                            const opInfo = this.getOpInfo(op);
+                            if (op.I) {
+                                const opInputs = Array.isArray(op.I) ? op.I : [op.I];
+                                for (const input of opInputs) {
+                                    const [, name, isNegative] = irReader.getParaName(input, opInfo.namePrefix);
+                                    if (!isNegative && !inputs.has(name)) {
+                                        inputs.set(name, [input, opInfo]);
+                                    }
+                                }
+                            }
+                            if (op.O) {
+                                const opOutputs = Array.isArray(op.O) ? op.O : [op.O];
+                                for (const [idx, output] of Object.entries(opOutputs)) {
+                                    const [, name, isNegative] = irReader.getParaName(output, opInfo.namePrefix);
+                                    if (!isNegative && !outputs.has(name)) {
+                                        outputs.set(name, [output, opInfo, idx, op.OA]);
+                                    }
+                                }
+                            }
+                            if (op.regions) {
+                                const [subInputs, subOutputs] = collectRegions(irReader, op.regions);
+                                inputs = new Map([...inputs, ...subInputs]);
+                                outputs = new Map([...outputs, ...subOutputs]);
+                            }
+                        }
+                    }
+                }
+                return [inputs, outputs];
+            };
+            const [subInputs, subOutputs] = collectRegions(this, op.regions);
+            for (const [name, inputArgs] of subInputs) {
+                if (!inputNames.has(name) && !subOutputs.has(name)) {
+                    const [input, opInfo] = inputArgs;
+                    inputs.push(createInput(input, opInfo));
+                    inputNames.add(name);
+                }
+            }
+            for (const [name, outputArgs] of subOutputs) {
+                if (!outputNames.has(name) && !subInputs.has(name)) {
+                    const [output, opInfo, idx, oa] = outputArgs;
+                    outputs.push(createOutput(output, opInfo, idx, oa));
+                    outputNames.add(name);
+                }
+            }
+        }
+        obj.inputs = inputs;
+        obj.outputs = outputs;
+        obj.inputNames = inputNames;
+        obj.outputNames = outputNames;
+        return obj;
+    }
+
+    attr(idx, value, opInfo) {
+        const obj = {};
+        obj.kind = 'attr';
+        if (value.kind === 'region') {
+            obj.name = value.name;
+            obj.type = 1001; // graph
+            obj.block = value.block;
+            obj.vars = value.vars;
+        } else {
+            const [attrName, attrType, attrValue] = this.getAttr(opInfo, idx, value);
+            obj.name = attrName;
+            obj.type = 1000; // ir
+            obj.irType = attrType;
+            obj.irValue = attrValue;
+        }
+        return obj;
+    }
+
+    getParaName(tensor, namePrefix) {
+        let idx = '';
+        if ('%' in tensor) {
+            idx = tensor['%'];
+        } else if ('#' in tensor) {
+            idx = tensor['#'];
+        }
+        if (tensor.TT && !this._names.has(idx)) {
+            const prefix = namePrefix || idx;
+            this._names.set(idx, `${prefix}`);
+        }
+        return [`${idx}`, this._names.has(idx) ? this._names.get(idx) : `${idx}`, Number.isInteger(idx) ? idx < 0 : false];
+    }
+
+    hasCrossInput(name) {
+        return this._crossRegionInputs.has(name);
+    }
+
+    getCrossInput(name) {
+        return this._crossRegionInputs.has(name) ? this._crossRegionInputs.get(name) : null;
+    }
+
+    addCrossInput(name, input) {
+        this._crossRegionInputs.set(name, input);
+    }
+
+    getOpInfo(op) {
+        const obj = {};
+        obj.rawType = op['#'];
+        obj._type = op['#'];
+        obj._name = op['#'];
+        switch (op['#']) {
+            case 'p': {
+                obj.kind = 'p';
+                [obj._name] = op.A.slice(3);
+                obj._type = this.getCompressOp(obj._type);
+                op.OA = [...op.OA, ...op.A];
+                obj.type = obj._type;
+                obj.name = obj._type;
+                obj.fullName = obj._type;
+                obj.namePrefix = obj._name;
+                break;
+            }
+            case '1.data': {
+                obj.kind = 'data';
+                [obj._opKey, obj._opType] = obj._name.split('.');
+                let prefix = '';
+                for (const attr of op.A) {
+                    if (attr.N === 'name') {
+                        prefix = attr.AT.D;
+                        break;
+                    }
+                }
+                obj._attr = op.A;
+                obj.type = obj._opType;
+                obj.name = obj._opType;
+                obj.fullName = `${this.getCompressOp(obj._opKey)}.${obj._opType}`;
+                obj.namePrefix = prefix;
+                break;
+            }
+            default: {
+                obj.kind = '';
+                [obj._opKey, obj._opType] = obj._name.split('.');
+                obj.type = obj._opType;
+                obj.name = obj._opType;
+                obj.fullName = `${this.getCompressOp(obj._opKey)}.${obj._opType}`;
+                obj.namePrefix = null;
+                break;
+            }
+        }
+        return obj;
+    }
+
+    createTensorType(data, denotation) {
+        const [type, dims, layout, ,] = data.TT.D;
+        const [, dataType] = type['#'].split('.');
+        const dtype = this.getType(dataType);
+        const shape = new paddle.TensorShape(dims);
+        return new paddle.TensorType(dtype, shape, layout, denotation);
+    }
+
+    getType(type) {
+        type = type.includes('_') ? type.split('_')[1] : type;
+        switch (type) {
+            case 'bool': return 'boolean';
+            case 'bf16': return 'bfloat16';
+            case 'fp16': return 'float16';
+            case 'fp32': return 'float32';
+            case 'fp64': return 'float64';
+            case 'fp8_e4m3fn': return 'float8e4m3fn';
+            case 'fp8_e5m2': return 'float8e5m2';
+            case 'f8e4m3fn': return 'float8e4m3fn';
+            case 'f8e5m2': return 'float8e5m2';
+            case 'f16': return 'float16';
+            case 'f32': return 'float32';
+            case 'f64': return 'float64';
+            case 'i8': return 'int8';
+            case 'ui8': return 'uint8';
+            case 'i16': return 'int16';
+            case 'i32': return 'int32';
+            case 'i64': return 'int64';
+            case 'c64': return 'complex64';
+            case 'c128': return 'complex128';
+            case 'str': return 'string';
+            default: return type;
+        }
+    }
+
+    getCompressOp(opType) {
+        switch (opType) {
+            case '0': return 'builtin';
+            case '1': return 'pd_op';
+            case '2': return 'cf';
+            case '3': return 'custom_op';
+            case '4': return 'pd_dist';
+            case 'p': return 'parameter';
+            default: return opType;
+        }
+    }
+
+    getAttrDenotation(name, value) {
+        if (value) {
+            if (typeof value === 'boolean') {
+                return `${name}`;
+            }
+            if (name !== 'name' && name !== 'dtype') {
+                return `${name}:${value}`;
+            }
+        }
+        return '';
+    }
+
+    getAttr(opInfo, idx, value) {
+        if (opInfo.kind === 'p') {
+            let attrName = '';
+            let attrType = '';
+            let attrValue = '';
+            switch (idx) {
+                case '0':
+                    attrName = 'is_distributed';
+                    attrType = this.getType('a_bool');
+                    break;
+                case '1':
+                    attrName = 'is_parameter';
+                    attrType = this.getType('a_bool');
+                    break;
+                case '2':
+                    attrName = 'need_clip';
+                    attrType = this.getType('a_bool');
+                    break;
+                case '3':
+                    attrName = 'name';
+                    attrType = this.getType('a_str');
+                    break;
+                default:
+                    break;
+            }
+            attrValue = attrType === this.getType('a_bool') ? value === 1 : value;
+            return [attrName, attrType, attrValue];
+        }
+        const attrName = value.N;
+        let attrType = this.getType(value.AT['#'].split('.')[1]);
+        let attrValue = value.AT.D;
+        if (attrType === this.getType('a_array') && attrValue.length > 0) {
+            const subType = this.getType(attrValue[0]['#'].split('.')[1]);
+            attrType = `${subType}[]`;
+            const valueData = [];
+            for (const attr of attrValue) {
+                valueData.push(attr.D);
+            }
+            attrValue = valueData;
+        }
+        if (attrName === 'place') {
+            const [place, val,] = attrValue;
+            let device = place;
+            switch (device) {
+                case 0: device = 'UNDEFINED'; break;
+                case 1: device = 'CPU'; break;
+                case 2: device = 'GPU'; break;
+                case 3: device = 'GPUPINNED'; break;
+                case 4: device = 'XPU'; break;
+                case 7: device = 'IPU'; break;
+                case 9: device = 'CUSTOM'; break;
+                default: break;
+            }
+            attrValue = `${device}:${val}`;
+        }
+        if (attrName === 'shape') {
+            attrValue = new paddle.TensorShape(attrValue);
+        }
+        return [attrName, attrType, attrValue];
+    }
+
+    getOutputAttr(opInfo, idx, outputAttr) {
+        switch (opInfo.kind) {
+            case 'p': {
+                const denotation = [];
+                if (outputAttr[0] === 1) {
+                    denotation.push('persistable');
+                }
+                if (outputAttr[1] === 1) {
+                    denotation.push('stop_gradient');
+                }
+                if (outputAttr[2] === 1) {
+                    denotation.push('trainable');
+                }
+                if (outputAttr[3] === 1) {
+                    denotation.push('is_distributed');
+                }
+                if (outputAttr[4] === 1) {
+                    denotation.push('is_parameter');
+                }
+                if (outputAttr[5] === 1) {
+                    denotation.push('need_clip');
+                }
+                return denotation.join(';');
+            }
+            case 'data': {
+                const denotation = [];
+                for (const attr of outputAttr) {
+                    const attrName = attr.N;
+                    const attrValue = attr.AT.D[idx].D;
+                    const attrDenotation = this.getAttrDenotation(attrName, attrValue);
+                    if (attrDenotation) {
+                        denotation.push(attrDenotation);
+                    }
+                }
+                for (const value of opInfo._attr) {
+                    const [attrName, , attrValue] = this.getAttr(opInfo, null, value);
+                    const attrDenotation = this.getAttrDenotation(attrName, attrValue);
+                    if (attrDenotation) {
+                        denotation.push(attrDenotation);
+                    }
+                }
+                return denotation.join(';');
+            }
+            default: {
+                const denotation = [];
+                for (const attr of outputAttr) {
+                    const attrName = attr.N;
+                    const attrValue = attr.AT.D[idx].D;
+                    const attrDenotation = this.getAttrDenotation(attrName, attrValue);
+                    if (attrDenotation) {
+                        denotation.push(attrDenotation);
+                    }
+                }
+                return denotation.join(';');
+            }
+        }
+    }
 };
 
 paddle.Error = class extends Error {

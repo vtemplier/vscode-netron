@@ -1,26 +1,32 @@
 
+import * as base from './base.js';
 import * as electron from 'electron';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as https from 'https';
+import * as node from './node.js';
+import * as os from 'os';
 import * as path from 'path';
 import * as url from 'url';
-import * as base from './base.js';
 import * as view from './view.js';
 
-const host = {};
+const desktop = {};
 
-host.ElectronHost = class {
+desktop.Host = class {
 
     constructor() {
         this._document = window.document;
         this._window = window;
+        this._global = global;
         this._telemetry = new base.Telemetry(this._window);
-        process.on('uncaughtException', (err) => {
-            this.exception(err, true);
-            this._terminate(err.message);
+        process.on('uncaughtException', (error) => {
+            this.exception(error, true);
+            this.message(error.message);
         });
-        this._window.eval = global.eval = () => {
+        this._global.eval = () => {
+            throw new Error('eval.eval() not supported.');
+        };
+        this._window.eval = () => {
             throw new Error('window.eval() not supported.');
         };
         this._window.addEventListener('unload', () => {
@@ -38,6 +44,16 @@ host.ElectronHost = class {
         if (!/^\d\.\d\.\d$/.test(this.version)) {
             throw new Error('Invalid version.');
         }
+        const metadata = [];
+        metadata.push(os.arch());
+        if (process.env.APPIMAGE) {
+            metadata.push('appimage');
+        } else if (process.env.SNAP) {
+            metadata.push('snap');
+        } else {
+            metadata.push('');
+        }
+        this._metadata = metadata.join('|');
     }
 
     get window() {
@@ -56,20 +72,26 @@ host.ElectronHost = class {
         return 'Electron';
     }
 
+    get metadata() {
+        return this._metadata;
+    }
+
     async view(view) {
         this._view = view;
-        electron.ipcRenderer.on('open', (_, data) => {
+        electron.ipcRenderer.on('open', (sender, data) => {
             this._open(data);
         });
         const age = async () => {
             const days = (new Date() - new Date(this._environment.date)) / (24 * 60 * 60 * 1000);
             if (days > 180) {
-                this._view.show('welcome');
-                this._terminate('Please update to the newest version.', 'Download', () => {
-                    const link = this._element('logo-github').href;
+                this.document.body.classList.remove('spinner');
+                const link = this._element('logo-github').href;
+                for (;;) {
+                    /* eslint-disable no-await-in-loop */
+                    await this.message('Please update to the newest version.', null, 'Download');
+                    /* eslint-enable no-await-in-loop */
                     this.openURL(link);
-                });
-                return new Promise(() => {});
+                }
             }
             return Promise.resolve();
         };
@@ -84,11 +106,12 @@ host.ElectronHost = class {
                     if (json && json.country && countries.indexOf(json.country) === -1) {
                         consent = false;
                     }
-                } catch (error) {
+                } catch {
                     // continue regardless of error
                 }
                 if (consent) {
-                    await this._message('This app uses cookies to report errors and anonymous usage information.', 'Accept');
+                    this.document.body.classList.remove('spinner');
+                    await this.message('This app uses cookies to report errors and anonymous usage information.', null, 'Accept');
                 }
                 this.set('consent', Date.now());
             }
@@ -102,11 +125,13 @@ host.ElectronHost = class {
                 this._telemetry.send('page_view', {
                     app_name: this.type,
                     app_version: this.version,
+                    app_metadata: this.metadata
                 });
                 this._telemetry.send('scroll', {
                     percent_scrolled: 90,
                     app_name: this.type,
-                    app_version: this.version
+                    app_version: this.version,
+                    app_metadata: this.metadata
                 });
                 this.set('user', this._telemetry.get('client_id'));
                 this.set('session', this._telemetry.session);
@@ -135,27 +160,32 @@ host.ElectronHost = class {
         if (this._document.hasFocus()) {
             this._document.body.classList.add('active');
         }
-        electron.ipcRenderer.on('recents', (_, data) => {
+        electron.ipcRenderer.on('recents', (sender, data) => {
             this._view.recents(data);
         });
-        electron.ipcRenderer.on('export', (_, data) => {
+        electron.ipcRenderer.on('export', (sender, data) => {
             this._view.export(data.file);
         });
         electron.ipcRenderer.on('cut', () => {
-            this._view.cut();
+            this.document.execCommand('cut');
         });
         electron.ipcRenderer.on('copy', () => {
-            this._view.copy();
+            this.document.execCommand('copy');
         });
         electron.ipcRenderer.on('paste', () => {
-            this._view.paste();
+            if (this.document.queryCommandSupported('paste')) {
+                this.document.execCommand('paste');
+            } else if (this.document.queryCommandSupported('insertText')) {
+                const content = electron.clipboard.readText();
+                this.document.execCommand('insertText', false, content);
+            }
         });
         electron.ipcRenderer.on('selectall', () => {
-            this._view.selectAll();
+            this.document.execCommand('selectall');
         });
         electron.ipcRenderer.on('toggle', (sender, name) => {
             this._view.toggle(name);
-            this._update(Object.assign({}, this._view.options));
+            this.update({ ...this._view.options });
         });
         electron.ipcRenderer.on('zoom-in', () => {
             this._element('zoom-in-button').click();
@@ -167,7 +197,7 @@ host.ElectronHost = class {
             this._view.resetZoom();
         });
         electron.ipcRenderer.on('show-properties', () => {
-            this._element('sidebar-button').click();
+            this._element('sidebar-target-button').click();
         });
         electron.ipcRenderer.on('find', () => {
             this._view.find();
@@ -184,7 +214,7 @@ host.ElectronHost = class {
         this._element('titlebar-minimize').addEventListener('click', () => {
             electron.ipcRenderer.sendSync('window-minimize', {});
         });
-        electron.ipcRenderer.on('window-state', (_, data) => {
+        electron.ipcRenderer.on('window-state', (sender, data) => {
             if (this._environment.titlebar) {
                 this._element('graph').style.marginTop = '32px';
                 this._element('graph').style.height = 'calc(100% - 32px)';
@@ -205,8 +235,8 @@ host.ElectronHost = class {
         electron.ipcRenderer.sendSync('update-window-state', {});
         const openFileButton = this._element('open-file-button');
         if (openFileButton) {
-            openFileButton.addEventListener('click', () => {
-                this.execute('open');
+            openFileButton.addEventListener('click', async () => {
+                await this.execute('open');
             });
         }
         this.document.addEventListener('dragover', (e) => {
@@ -217,9 +247,10 @@ host.ElectronHost = class {
         });
         this.document.body.addEventListener('drop', (e) => {
             e.preventDefault();
-            const paths = Array.from(e.dataTransfer.files).map(((file) => file.path));
+            const files = Array.from(e.dataTransfer.files);
+            const paths = files.map((file) => electron.webUtils.getPathForFile(file));
             if (paths.length > 0) {
-                electron.ipcRenderer.send('drop-paths', { paths: paths });
+                electron.ipcRenderer.send('drop-paths', { paths });
             }
             return false;
         });
@@ -230,74 +261,72 @@ host.ElectronHost = class {
         return this._environment[name];
     }
 
-    async error(message, detail, cancel) {
-        const options = {
-            type: 'error',
-            message: message,
-            detail: detail,
-            buttons: cancel ? ['Report', 'Cancel'] : ['Report']
-        };
-        return electron.ipcRenderer.sendSync('show-message-box', options);
-        // return await this._message(message + ': ' + detail, 'Report');
-    }
-
-    confirm(message, detail) {
-        const result = electron.ipcRenderer.sendSync('show-message-box', {
-            type: 'question',
-            message: message,
-            detail: detail,
-            buttons: ['Yes', 'No'],
-            defaultId: 0,
-            cancelId: 1
-        });
-        return result === 0;
+    async error(message) {
+        await this.message(message, true, 'OK');
     }
 
     async require(id) {
         return import(`${id}.js`);
     }
 
-    save(name, extension, defaultPath, callback) {
-        const selectedFile = electron.ipcRenderer.sendSync('show-save-dialog', {
-            title: 'Export Tensor',
-            defaultPath: defaultPath,
-            buttonLabel: 'Export',
-            filters: [{ name: name, extensions: [extension] }]
+    worker(id) {
+        return new this.window.Worker(`${id}.js`, { type: 'module' });
+    }
+
+    async save(name, extension, defaultPath) {
+        return new Promise((resolve, reject) => {
+            electron.ipcRenderer.once('show-save-dialog-complete', (event, data) => {
+                if (data.error) {
+                    reject(new Error(data.error));
+                } else if (data.canceled) {
+                    resolve(null);
+                } else {
+                    resolve(data.filePath);
+                }
+            });
+            electron.ipcRenderer.send('show-save-dialog', {
+                title: 'Export Tensor',
+                defaultPath,
+                buttonLabel: 'Export',
+                filters: [{ name, extensions: [extension] }]
+            });
         });
-        if (selectedFile) {
-            callback(selectedFile);
-        }
     }
 
     async export(file, blob) {
         const reader = new FileReader();
         reader.onload = (e) => {
             const data = new Uint8Array(e.target.result);
-            fs.writeFile(file, data, null, (err) => {
-                if (err) {
-                    this.exception(err, false);
-                    this.error('Error writing file.', err.message);
+            fs.writeFile(file, data, null, async (error) => {
+                if (error) {
+                    await this._view.error(error, 'Error writing file.');
                 }
             });
         };
-
-        let err = null;
+        let error = null;
         if (!blob) {
-            err = new Error(`Export blob is '${JSON.stringify(blob)}'.`);
+            error = new Error(`Export blob is '${JSON.stringify(blob)}'.`);
         } else if (!(blob instanceof Blob)) {
-            err = new Error(`Export blob type is '${typeof blob}'.`);
+            error = new Error(`Export blob type is '${typeof blob}'.`);
         }
-
-        if (err) {
-            this.exception(err, false);
-            await this.error('Error exporting image.', err.message);
+        if (error) {
+            await this._view.error(error, 'Error exporting image.');
         } else {
             reader.readAsArrayBuffer(blob);
         }
     }
 
-    execute(name, value) {
-        electron.ipcRenderer.send('execute', { name: name, value: value });
+    async execute(name, value) {
+        return new Promise((resolve, reject) => {
+            electron.ipcRenderer.once('execute-complete', (event, data) => {
+                if (data.error) {
+                    reject(new Error(data.error));
+                } else {
+                    resolve(data.value);
+                }
+            });
+            electron.ipcRenderer.send('execute', { name, value });
+        });
     }
 
     async request(file, encoding, basename) {
@@ -322,7 +351,8 @@ host.ElectronHost = class {
                 } else if (encoding) {
                     reject(new Error(`The file '${file}' size (${stat.size.toString()}) for encoding '${encoding}' is greater than 2 GB.`));
                 } else {
-                    resolve(new host.ElectronHost.FileStream(pathname, 0, stat.size, stat.mtimeMs));
+                    const stream = new node.FileStream(pathname, 0, stat.size, stat.mtimeMs);
+                    resolve(stream);
                 }
             });
         });
@@ -364,13 +394,14 @@ host.ElectronHost = class {
                 this._telemetry.send('exception', {
                     app_name: this.type,
                     app_version: this.version,
+                    app_metadata: this.metadata,
                     error_name: name,
                     error_message: message,
                     error_context: context,
                     error_stack: stack,
                     error_fatal: fatal ? true : false
                 });
-            } catch (e) {
+            } catch {
                 // continue regardless of error
             }
         }
@@ -380,6 +411,7 @@ host.ElectronHost = class {
         if (name && params) {
             params.app_name = this.type;
             params.app_version = this.version;
+            params.app_metadata = this.metadata;
             this._telemetry.send(name, params);
         }
     }
@@ -390,7 +422,7 @@ host.ElectronHost = class {
         if (stat.isFile()) {
             const dirname = path.dirname(location);
             const stream = await this.request(basename, null, dirname);
-            return new host.ElectronHost.Context(this, dirname, basename, stream);
+            return new desktop.Context(this, dirname, basename, stream);
         } else if (stat.isDirectory()) {
             const entries = new Map();
             const walk = (dir) => {
@@ -400,14 +432,14 @@ host.ElectronHost = class {
                     if (stat.isDirectory()) {
                         walk(pathname);
                     } else if (stat.isFile()) {
-                        const stream = new host.ElectronHost.FileStream(pathname, 0, stat.size, stat.mtimeMs);
+                        const stream = new node.FileStream(pathname, 0, stat.size, stat.mtimeMs);
                         const name = pathname.split(path.sep).join(path.posix.sep);
                         entries.set(name, stream);
                     }
                 }
             };
             walk(location);
-            return new host.ElectronHost.Context(this, location, basename, null, entries);
+            return new desktop.Context(this, location, basename, null, entries);
         }
         throw new Error(`Unsupported path stat '${JSON.stringify(stat)}'.`);
     }
@@ -427,26 +459,34 @@ host.ElectronHost = class {
                 context = await this._context(path);
                 this._telemetry.set('session_engaged', 1);
             } catch (error) {
-                await this._view.error(error, 'Error while reading file.', null);
-                this._update({ path: null });
+                await this._view.error(error, 'Error while reading file.');
+                this.update({ path: null });
                 return;
             }
             try {
-                const model = await this._view.open(context);
-                this._view.show(null);
-                const options = Object.assign({}, this._view.options);
-                if (model) {
-                    options.path = path;
-                    this._title(location.label);
+                const attachment = await this._view.attach(context);
+                if (attachment) {
+                    this._view.show(null);
+                } else {
+                    const model = await this._view.open(context);
+                    this._view.show(null);
+                    const options = { ...this._view.options };
+                    if (model) {
+                        options.path = path;
+                        this._title(location.label);
+                    } else {
+                        options.path = path;
+                        this._title('');
+                    }
+                    electron.ipcRenderer.send('update-recents', { path });
+                    this.update(options);
                 }
-                this._update(options);
             } catch (error) {
-                const options = Object.assign({}, this._view.options);
+                const options = { ...this._view.options };
                 if (error) {
-                    await this._view.error(error, null, null);
-                    options.path = null;
+                    await this._view.error(error);
                 }
-                this._update(options);
+                this.update(options);
             }
         }
     }
@@ -461,23 +501,21 @@ host.ElectronHost = class {
                 options.timeout = timeout;
             }
             const request = protocol.request(location, options, (response) => {
-                if (response.statusCode !== 200) {
-                    const err = new Error(`The web request failed with status code ${response.statusCode} at '${location}'.`);
-                    err.type = 'error';
-                    err.url = location;
-                    err.status = response.statusCode;
-                    reject(err);
-                } else {
+                if (response.statusCode === 200) {
                     let data = '';
                     response.on('data', (chunk) => {
                         data += chunk;
                     });
-                    response.on('err', (err) => {
+                    response.on('error', (err) => {
                         reject(err);
                     });
                     response.on('end', () => {
                         resolve(data);
                     });
+                } else {
+                    const error = new Error(`The web request failed with status code '${response.statusCode}'.`);
+                    error.context = location;
+                    reject(error);
                 }
             });
             request.on("error", (err) => {
@@ -485,9 +523,8 @@ host.ElectronHost = class {
             });
             request.on("timeout", () => {
                 request.destroy();
-                const error = new Error(`The web request timed out at '${location}'.`);
-                error.type = 'timeout';
-                error.url = url;
+                const error = new Error('The web request timed out.');
+                error.context = url;
                 reject(error);
             });
             request.end();
@@ -496,8 +533,8 @@ host.ElectronHost = class {
 
     get(name) {
         try {
-            return electron.ipcRenderer.sendSync('get-configuration', { name: name });
-        } catch (error) {
+            return electron.ipcRenderer.sendSync('get-configuration', { name });
+        } catch {
             // continue regardless of error
         }
         return undefined;
@@ -505,16 +542,16 @@ host.ElectronHost = class {
 
     set(name, value) {
         try {
-            electron.ipcRenderer.sendSync('set-configuration', { name: name, value: value });
-        } catch (error) {
+            electron.ipcRenderer.sendSync('set-configuration', { name, value });
+        } catch {
             // continue regardless of error
         }
     }
 
     delete(name) {
         try {
-            electron.ipcRenderer.sendSync('delete-configuration', { name: name });
-        } catch (error) {
+            electron.ipcRenderer.sendSync('delete-configuration', { name });
+        } catch {
             // continue regardless of error
         }
     }
@@ -527,7 +564,7 @@ host.ElectronHost = class {
                 const path = label.split(this._environment.separator || '/');
                 for (let i = 0; i < path.length; i++) {
                     const span = this.document.createElement('span');
-                    span.innerHTML = ` ${path[i]} ${i !== path.length - 1 ? '<svg class="titlebar-icon" aria-hidden="true"><use xlink:href="#icon-arrow-right"></use></svg>' : ''}`;
+                    span.innerHTML = ` ${path[i]} ${i === path.length - 1 ? '' : '<svg class="titlebar-icon" aria-hidden="true"><use xlink:href="#icon-arrow-right"></use></svg>'}`;
                     element.appendChild(span);
                 }
             }
@@ -538,151 +575,41 @@ host.ElectronHost = class {
         return this.document.getElementById(id);
     }
 
-    _update(data) {
+    update(data) {
         electron.ipcRenderer.send('window-update', data);
     }
 
-    _terminate(message, action, callback) {
-        this._element('message-text').innerText = message;
-        const button = this._element('message-button');
-        if (action && callback) {
-            button.style.removeProperty('display');
-            button.innerText = action;
-            button.onclick = () => callback(0);
-            button.focus();
-        } else {
-            button.style.display = 'none';
-            button.onclick = null;
-        }
-        if (this._view) {
-            try {
-                this._view.show('welcome message');
-            } catch (error) {
-                // continue regardless of error
-            }
-        }
-        this._document.body.setAttribute('class', 'welcome message');
-    }
-
-    _message(message, action) {
+    async message(message, alert, action) {
         return new Promise((resolve) => {
-            this._element('message-text').innerText = message;
+            const type = this.document.body.getAttribute('class');
+            this._element('message-text').innerText = message || '';
             const button = this._element('message-button');
             if (action) {
                 button.style.removeProperty('display');
                 button.innerText = action;
                 button.onclick = () => {
                     button.onclick = null;
-                    this._document.body.classList.remove('message');
+                    this.document.body.setAttribute('class', type);
                     resolve(0);
                 };
-                button.focus();
             } else {
                 button.style.display = 'none';
                 button.onclick = null;
             }
-            this._document.body.classList.add('message');
+            if (alert) {
+                this.document.body.setAttribute('class', 'alert');
+            } else {
+                this.document.body.classList.add('notification');
+                this.document.body.classList.remove('default');
+            }
+            if (action) {
+                button.focus();
+            }
         });
     }
 };
 
-host.ElectronHost.FileStream = class {
-
-    constructor(file, start, length, mtime) {
-        this._file = file;
-        this._start = start;
-        this._length = length;
-        this._position = 0;
-        this._mtime = mtime;
-    }
-
-    get position() {
-        return this._position;
-    }
-
-    get length() {
-        return this._length;
-    }
-
-    stream(length) {
-        const file = new host.ElectronHost.FileStream(this._file, this._position, length, this._mtime);
-        this.skip(length);
-        return file;
-    }
-
-    seek(position) {
-        this._position = position >= 0 ? position : this._length + position;
-    }
-
-    skip(offset) {
-        this._position += offset;
-        if (this._position > this._length) {
-            const offset = this._position - this._length;
-            throw new Error(`Expected ${offset} more bytes. The file might be corrupted. Unexpected end of file.`);
-        }
-    }
-
-    peek(length) {
-        length = length !== undefined ? length : this._length - this._position;
-        if (length < 0x1000000) {
-            const position = this._fill(length);
-            this._position -= length;
-            return this._buffer.subarray(position, position + length);
-        }
-        const position = this._position;
-        this.skip(length);
-        this.seek(position);
-        const buffer = new Uint8Array(length);
-        this._read(buffer, position);
-        return buffer;
-    }
-
-    read(length) {
-        length = length !== undefined ? length : this._length - this._position;
-        if (length < 0x10000000) {
-            const position = this._fill(length);
-            return this._buffer.slice(position, position + length);
-        }
-        const position = this._position;
-        this.skip(length);
-        const buffer = new Uint8Array(length);
-        this._read(buffer, position);
-        return buffer;
-    }
-
-    _fill(length) {
-        if (this._position + length > this._length) {
-            const offset = this._position + length - this._length;
-            throw new Error(`Expected ${offset} more bytes. The file might be corrupted. Unexpected end of file.`);
-        }
-        if (!this._buffer || this._position < this._offset || this._position + length > this._offset + this._buffer.length) {
-            this._offset = this._position;
-            const length = Math.min(0x1000000, this._length - this._offset);
-            if (!this._buffer || length !== this._buffer.length) {
-                this._buffer = new Uint8Array(length);
-            }
-            this._read(this._buffer, this._offset);
-        }
-        const position = this._position;
-        this._position += length;
-        return position - this._offset;
-    }
-
-    _read(buffer, offset) {
-        const descriptor = fs.openSync(this._file, 'r');
-        const stat = fs.statSync(this._file);
-        if (stat.mtimeMs !== this._mtime) {
-            throw new Error(`File '${this._file}' last modified time changed.`);
-        }
-        try {
-            fs.readSync(descriptor, buffer, 0, buffer.length, offset + this._start);
-        } finally {
-            fs.closeSync(descriptor);
-        }
-    }
-};
-
-host.ElectronHost.Context = class {
+desktop.Context = class {
 
     constructor(host, folder, identifier, stream, entries) {
         this._host = host;
@@ -705,20 +632,22 @@ host.ElectronHost.Context = class {
     }
 
     async request(file, encoding, base) {
-        return await this._host.request(file, encoding, base === undefined ? this._folder : base);
+        return this._host.request(file, encoding, base === undefined ? this._folder : base);
     }
 
     async require(id) {
-        return await this._host.require(id);
+        return this._host.require(id);
     }
 
-    exception(error, fatal) {
+    error(error, fatal) {
         this._host.exception(error, fatal);
     }
 };
 
-window.addEventListener('load', () => {
-    const value = new host.ElectronHost();
-    window.__view__ = new view.View(value);
-    window.__view__.start();
-});
+if (typeof window !== 'undefined') {
+    window.addEventListener('load', () => {
+        const value = new desktop.Host();
+        window.__view__ = new view.View(value);
+        window.__view__.start();
+    });
+}

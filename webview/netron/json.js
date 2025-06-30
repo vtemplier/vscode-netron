@@ -67,7 +67,7 @@ json.TextReader = class {
         this._position = 0;
         this._char = this._decoder.decode();
         this._whitespace();
-        let obj = undefined;
+        let obj = null;
         let first = true;
         for (;;) {
             if (Array.isArray(obj)) {
@@ -149,7 +149,6 @@ json.TextReader = class {
                     switch (key) {
                         case '__proto__':
                         case 'constructor':
-                        case 'prototype':
                             throw new json.Error(`Invalid key '${key}' ${this._location()}`);
                         default:
                             break;
@@ -207,7 +206,7 @@ json.TextReader = class {
                         break;
                     }
                     default: {
-                        let value;
+                        let value = null;
                         if (c === '"') {
                             value = this._string();
                         } else if (c >= '0' && c <= '9') {
@@ -383,7 +382,7 @@ json.TextReader = class {
         let line = 1;
         let column = 1;
         this._decoder.position = 0;
-        let c;
+        let c = '';
         do {
             if (this._decoder.position === this._position) {
                 return `at ${line}:${column}.`;
@@ -404,14 +403,36 @@ json.TextReader = class {
 json.BinaryReader = class {
 
     static open(data) {
-        return data ? new json.BinaryReader(data) : null;
+        const length = data.length;
+        const buffer = data instanceof Uint8Array ? data : data.peek(Math.min(data.length, 8));
+        const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+        if (buffer.length >= 4 && view.getInt32(0, true) === length) {
+            return new json.BinaryReader(data, 'bson');
+        }
+        const [signature] = buffer;
+        if (signature === 0x7B || signature === 0x5B) {
+            return new json.BinaryReader(data, 'ubj');
+        }
+        return null;
     }
 
-    constructor(data) {
+    constructor(data, format) {
         this._buffer = data instanceof Uint8Array ? data : data.peek();
+        this._format = format;
     }
 
     read() {
+        switch (this._format) {
+            case 'bson':
+                return this._readBson();
+            case 'ubj':
+                return this._readUbj();
+            default:
+                throw new json.Error(`Unsupported binary JSON format '${this._format}'.`);
+        }
+    }
+
+    _readBson() {
         const buffer = this._buffer;
         const length = buffer.length;
         const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
@@ -548,6 +569,10 @@ json.BinaryReader = class {
             throw new bson.Error(`Unexpected data at '${position}'.`);
         }
         return obj;
+    }
+
+    _readUbj() {
+        throw new json.Error('Unsupported JSON UBJ data.');
     }
 };
 

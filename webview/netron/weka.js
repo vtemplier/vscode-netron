@@ -6,7 +6,7 @@ const java = {};
 
 weka.ModelFactory = class {
 
-    match(context) {
+    async match(context) {
         try {
             const stream = context.stream;
             if (stream.length >= 5) {
@@ -15,18 +15,18 @@ weka.ModelFactory = class {
                     const reader = new java.io.InputObjectStream(stream);
                     const obj = reader.read();
                     if (obj && obj.$class && obj.$class.name) {
-                        context.type = 'weka';
-                        context.target = obj;
+                        return context.set('weka', obj);
                     }
                 }
             }
-        } catch (err) {
+        } catch {
             // continue regardless of error
         }
+        return null;
     }
 
     async open(context) {
-        const obj = context.target;
+        const obj = context.value;
         throw new weka.Error(`Unsupported type '${obj.$class.name}'.`);
     }
 };
@@ -144,12 +144,11 @@ java.io.InputObjectStream = class {
             superClass = superClass.superClass;
         }
         if (flags & 0x02) { // SC_SERIALIZABLE
-            debugger;
             const customObject = objects[classname];
             const hasReadObjectMethod = customObject && customObject.readObject;
             if (flags & 0x01) { // SC_WRITE_METHOD
                 if (!hasReadObjectMethod) {
-                    throw new Error('Class "'+ classname + '" dose not implement readObject()');
+                    throw new Error(`Class '${classname}' does not implement readObject().`);
                 }
                 customObject.readObject(this, obj);
                 if (this._reader.byte() !== 0x78) { // TC_ENDBLOCKDATA
@@ -204,8 +203,8 @@ java.io.InputObjectStream.BinaryReader = class {
 
     skip(offset) {
         this._position += offset;
-        if (this._position > this._end) {
-            throw new java.io.Error(`Expected ${this._position - this._end} more bytes. The file might be corrupted. Unexpected end of file.`);
+        if (this._position > this._length) {
+            throw new java.io.Error(`Expected ${this._position - this._length} more bytes. The file might be corrupted. Unexpected end of file.`);
         }
     }
 
@@ -234,7 +233,7 @@ java.io.InputObjectStream.BinaryReader = class {
     }
 
     string(long) {
-        const size = long ? Number(this.uint64()) : this.uint16();
+        const size = long ? this.uint64().toNumber() : this.uint16();
         const position = this._position;
         this.skip(size);
         this._decoder = this._decoder || new TextDecoder('utf-8');

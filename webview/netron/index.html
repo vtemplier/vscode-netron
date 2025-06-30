@@ -27,21 +27,31 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 .default { background-color: #ffffff; }
 .default .logo { display: none; }
 .default .graph { display: flex; opacity: 1; }
-.default .toolbar { display: table; }
-.toolbar { position: absolute; bottom: 10px; left: 10px; padding: 0; margin: 0; user-select: none; -webkit-user-select: none; -moz-user-select: none; }
+.default .toolbar { display: flex; }
+.toolbar { display: flex; align-items: center; position: absolute; bottom: 10px; left: 10px; padding: 0; margin: 0; user-select: none; -webkit-user-select: none; -moz-user-select: none; }
 .toolbar button:focus { outline: 0; }
-.toolbar-button { float: left; background: None; border-radius: 6px; border: 0; margin: 0; margin-right: 1px; padding: 0; fill: None; stroke: #777; cursor: pointer; width: 24px; height: 24px; user-select: none; }
-.toolbar-path { float: left }
-.toolbar-path-back-button { float: left; background: #777; border-top-left-radius: 6px; border-bottom-left-radius: 6px; border: 0px solid; border-color: #777; margin: 2px 0px 2px 8px; padding: 0 8px 0 8px; cursor: pointer; height: 20px; color: #ffffff; font-size: 11px; line-height: 0; transition: 0.1s; }
+.toolbar-button { background: None; border-radius: 6px; border: 0; margin: 0; margin-right: 1px; padding: 0; fill: None; stroke: #777; cursor: pointer; width: 32px; height: 32px; user-select: none; }
+.toolbar-path { display: flex; align-items: center; }
+.toolbar-select { background: transparent; position: relative; width: 170px; margin: 4px 4px 4px 4px; }
+.toolbar-select select { width: 100%; appearance: none; -webkit-appearance: none; -moz-appearance: none; font-family: inherit; font-size: 12px; line-height: 16px; border: 1px solid; padding: 3px 18px 3px 10px; border-radius: 6px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; box-sizing: border-box; }
+.toolbar-select select { background: #777; border-color: #777; color: #fff; }
+.toolbar-select-arrow { position: absolute; top: 50%; right: 8px; transform: translateY(-50%); pointer-events: none; }
+.toolbar-select-arrow { fill: #ffffff; }
+.toolbar-select select:hover { background: #000000; border-color: #000000; }
+.toolbar-select select:focus { outline: 0; }
+.toolbar-path-back-button { background: #777; border-top-left-radius: 6px; border-bottom-left-radius: 6px; border: 1px solid; border-color: #777; margin: 4px 0px 4px 4px; padding: 5px 8px 5px 8px; cursor: pointer; color: #ffffff; font-size: 12px; line-height: 12px; transition: 0.1s; }
 .toolbar-path-back-button:hover { background: #000000; border-color: #000000; }
-.toolbar-path-name-button { float: left; background: #777; border: 0px solid; border-color: #777; color: #ffffff; border-left: 1px; border-left-color: #ffffff; margin: 2px 0 2px 1px; padding: 0 8px 0 8px; cursor: pointer; width: auto; height: 20px; font-size: 11px; line-height: 0; transition: 0.1s; }
+.toolbar-path-name-button { background: #777; border: 0px; border-color: #777; color: #ffffff; border-left: 1px; border-left-color: #ffffff; margin: 4px 0 4px 1px; padding: 6px 8px 6px 8px; cursor: pointer; width: auto; font-size: 12px; line-height: 12px; transition: 0.1s; }
 .toolbar-path-name-button:hover { background: #000000; border-color: #000000; }
 .toolbar-path-name-button:last-child { border-top-right-radius: 6px; border-bottom-right-radius: 6px; }
 .toolbar-icon .border { stroke: #fff; }
 .toolbar-icon .stroke { stroke: #808080; }
+.toolbar-icon .fill { fill: #808080; }
 .toolbar-icon:hover .stroke { stroke: #000000; }
-.welcome body { background-color: #ececec; }
-.welcome { background-color: #ececec; color: #242424; }
+.toolbar-icon:hover .fill { fill: #000000; }
+.message { display: none; opacity: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%; flex-direction: column; justify-content: flex-start; }
+.message-text { display: inline; text-align: center; width: 562px; font-size: 13px; line-height: 20px; margin-top: 50vh; padding-top: 56px; padding-bottom: 20px; margin-left: auto; margin-right: auto; user-select: text; -webkit-user-select: text; -moz-user-select: text; }
+.message-button { display: inline; text-align: center; width: 125px; margin-left: auto; margin-right: auto; }
 .logo-text { top: -57px; width: 582px; transition: 0.1s; }
 .logo-name { top: -170px; width: 582px; transition: 0.1s; }
 .logo-icon { left: 248px; top: -18px; width: 106px; height: 106px; transition: 0.1s; }
@@ -58,18 +68,30 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 .open-file-button { top: 170px; left: 0px; width: 10.5em; }
 .progress { top: 120px; height: 2px; width: 400px; }
 .progress-bar { height: 100%; width: 0%; background-color: #444444; }
-.message-dialog { display: none; color: #444444; }
-.message-button { top: 224px; left: 0px; width: 125px; }
-.message-text { display: inline-flex; align-items: center; justify-content: center; text-align: center; top: 132px; height: 0px; font-size: 13px; line-height: 20px; }
-.message .message-dialog { display: block; }
-.message .logo-name { display:none; }
-.message .open-file-button { display:none; }
-.message .progress { display:none; }
+.notification .logo-name { display: none; }
+.notification .open-file-button { display: none; }
+.notification .progress { display: none; }
+.welcome body { background-color: #ececec; }
+.welcome { background-color: #ececec; color: #242424; }
+.welcome .message-text { display: none; opacity: 0; }
+.welcome .message-button { display: none; opacity: 0; }
 .welcome .graph { display: none; opacity: 0; }
 .welcome .menu { background-color: #ffffff; }
 .welcome.spinner .logo-spinner { display: block; -webkit-animation: orbit 0.5s infinite linear; animation: orbit 0.5s infinite linear; cursor: wait; }
 .welcome.spinner .menu-button { display: none; }
-.welcome.message .menu-button { display: none; }
+.welcome.notification .menu-button { display: none; }
+.notification body { background-color: #ececec; }
+.notification .message { display: flex; opacity: 1; }
+.notification .message-text { display: inline; opacity: 1; }
+.notification .message-button { display: inline; opacity: 1; }
+.alert { background-color: #ececec; color: #242424; }
+.alert .graph { display: none; opacity: 0; }
+.alert .toolbar { display: none; opacity: 0; }
+.alert .menu { display: none; opacity: 0; }
+.alert .logo { display: none; opacity: 0; }
+.alert .message { display: flex; opacity: 1; }
+.alert .message-text { display: inline; opacity: 1; width: 50%; padding-top: 0px; }
+.alert .message-button { display: inline; opacity: 1; }
 .about { overflow: hidden; }
 .about .toolbar { display: none; }
 .about .logo { display: block; background-color: #ececec; color: #666666; }
@@ -80,7 +102,7 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 .about a:hover { color: #242424; }
 .about .open-file-button { display: none; }
 .about .logo-name { display: none; }
-.about .message { display: none; }
+.about .notification { display: none; }
 .about .progress { display: none; }
 .about .menu-button { display: none; }
 .titlebar { color: #aaaaaa; display: none; height: 32px; position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 2; -webkit-app-region: drag; }
@@ -113,14 +135,14 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 .welcome.spinner .logo-name { display: none; }
 .welcome.spinner .open-file-button { display: none; }
 .welcome.spinner .graph { display: flex; opacity: 0; }
-.welcome .message .logo-name { display: none; }
-.welcome .message .open-file-button { display: none; }
+.welcome .notification .logo-name { display: none; }
 .welcome .toolbar { display: none; }
 @media (prefers-color-scheme: dark) {
 :root { color-scheme: dark; }
 .default { background-color: #404040; }
 .graph { background-color: #404040; }
 .welcome { background-color: #1e1e1e; color: #888888; }
+.alert { background-color: #1e1e1e; color: #888888; }
 .logo-stroke { stroke: #888888; }
 .logo-fill { fill: #888888; }
 .logo-border { stroke: #000000; }
@@ -128,19 +150,23 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 .logo-spinner-stroke { stroke: #ffffff; }
 .logo-button { color: #888888; background-color: #1e1e1e; border-color: #888888; }
 .logo-button:hover { color: #1e1e1e; background-color: #888888; }
-.message-dialog { color: #888888; }
 .welcome .progress-bar { background-color: #888888; }
 .welcome .menu { background-color: #2d2d2d }
 .about .logo { background-color: #1e1e1e; color: #888888; }
 .about a { color: #c6c6c6; }
-.about a:hover { color: #ffffff; }
-.toolbar-icon .border { stroke: #1d1d1d; }
+.about a:hover { color: #565656; }
+.toolbar-icon .border { stroke: #333333; }
 .toolbar-icon .stroke { stroke: #aaaaaa; }
+.toolbar-icon .fill { fill: #aaaaaa; }
 .toolbar-icon:hover .stroke { stroke: #dfdfdf; }
+.toolbar-icon:hover .fill { fill: #dfdfdf; }
 .toolbar-path-back-button { background: #aaaaaa; border-color: #aaaaaa; color: #333333; }
 .toolbar-path-back-button:hover { background: #dfdfdf; border-color: #dfdfdf; }
 .toolbar-path-name-button { background: #aaaaaa ; border-color: #aaaaaa; color: #404040; }
 .toolbar-path-name-button:hover { background: #dfdfdf; border-color: #dfdfdf; }
+.toolbar-select select { background: #aaaaaa; border-color: #aaaaaa; color: #404040; }
+.toolbar-select select:hover { background: #dfdfdf; border-color: #dfdfdf; color: #404040; }
+.toolbar-select-arrow { fill: #404040; }
 .titlebar { color: #949494; }
 .welcome body { background-color: #1e1e1e; }
 .default body { background-color: #404040; }
@@ -161,45 +187,46 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 .logo { width: 240px; }
 .logo-text { opacity: 0; }
 .logo-name { opacity: 0; }
-.logo-icon { left: 0; top: 0; width: 128px; height: 128px; }
-.logo-spinner { left: 0; top: 0; width: 128px; height: 128px; }
+.logo-icon { left: 0; width: 128px; height: 128px;  }
+.logo-spinner { left: 0; width: 128px; height: 128px; }
 .logo .open-file-button { top: 204px; left: 0; }
-.message-dialog .message-button { top: 304px; }
-.message-dialog .message-text { top: 190px; width: 240px; }
+.message-text { padding-top: 68px; width: 320px; }
 .progress { top: 160px; height: 2px; width: 100px; }
 .about .logo { width: 100%; padding-left: 0; padding-right: 0; }
 .about .logo-message { top: 175px; font-size: 12px; }
 .about .logo-github { top: 370px; }
-}
-@media only screen and (max-device-width: 1024px) {
-.toolbar-button { width: 32px; height: 32px; }
-.toolbar-path-back-button { margin-top: 6px; margin-bottom: 6px; }
-.toolbar-path-name-button { margin-top: 6px; margin-bottom: 6px; }
 }
 .sidebar { display: flex; flex-direction: column; font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif; font-size: 12px; height: 100%; right: -100%; position: fixed; transition: 0.1s; top: 0; background-color: #ececec; color: #242424; overflow: hidden; border-left: 1px solid rgba(255, 255, 255, 0.5); opacity: 0; }
 .sidebar-title { font-weight: bold; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; height: 20px; margin: 0; padding: 20px; user-select: none; -webkit-user-select: none; -moz-user-select: none; }
 .sidebar-closebutton { padding: 8px 8px 8px 32px; text-decoration: none; font-size: 25px; color: #777777; opacity: 1.0; display: block; transition: 0.2s; position: absolute; top: 0; right: 15px; margin-left: 50px; user-select: none; -webkit-user-select: none; -moz-user-select: none; }
 .sidebar-closebutton:hover { color: #242424; }
 .sidebar-content { display: flex; flex-direction: column; flex-grow: 1; height: 0; }
-.sidebar-header { font-weight: bold; font-size: 11px; text-transform: uppercase; line-height: 1.25; margin-top: 16px; margin-bottom: 16px; border-bottom: 1px solid #ececec; display: block; user-select: none; -webkit-user-select: none; -moz-user-select: none; cursor: default; }
+.sidebar-header { font-weight: bold; font-size: 12px; letter-spacing: 0.5px; text-transform: uppercase; height: 20px; margin: 0; margin-top: 30px; padding-top: 10px; padding-bottom: 10px; user-select: none; -webkit-user-select: none; -moz-user-select: none; }
+.sidebar-section { font-weight: bold; font-size: 11px; text-transform: uppercase; line-height: 1.25; margin-top: 16px; margin-bottom: 16px; display: block; user-select: none; -webkit-user-select: none; -moz-user-select: none; cursor: default; }
 .sidebar-object { flex-grow: 1; padding: 0px 20px 20px 20px; overflow-y: auto; }
 .sidebar-item { margin-bottom: 0px; display: block; }
 .sidebar-item-name { float: left; font-size: 11px; min-width: 95px; max-width: 95px; padding-right: 5px; padding-top: 7px; display: block; }
 .sidebar-item-name input { color: #777; font-family: inherit; font-size: inherit; color: inherit; background-color: inherit; width: 100%; text-align: right; margin: 0; padding: 0; border: 0; outline: none; text-overflow: ellipsis; }
 .sidebar-item-value-list { margin: 0; margin-left: 105px; overflow: hidden; display: block; padding: 0; }
 .sidebar-item-value { font-size: 11px; background-color: #fcfcfc; border-radius: 2px; border: 1px solid #fcfcfc; margin-top: 3px; margin-bottom: 3px; overflow: auto; }
-.sidebar-item-value-dark { background-color: #f8f8f8; border: 1px solid #f8f8f8; }
+.sidebar-item-value-content { background-color: #f8f8f8; border: 1px solid #f8f8f8; }
 .sidebar-item-value b { font-weight: bold; }
 .sidebar-item-value code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; overflow: auto; white-space: pre-wrap; word-wrap: break-word; }
 .sidebar-item-value pre { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; margin: 0; overflow: auto; white-space: pre; word-wrap: normal; display: block; }
-.sidebar-item-value-line { padding: 4px 6px 4px 6px; }
+.sidebar-item-value-line { padding: 4px 6px 4px 6px; overflow-x: auto; white-space: pre; }
+.sidebar-item-value-line-break { padding: 4px 6px 4px 6px; overflow-x: auto; white-space: pre; }
 .sidebar-item-value-line-link { padding: 4px 6px 4px 6px; cursor: default; overflow-x: auto; white-space: nowrap; }
 .sidebar-item-value-line-link:hover { text-decoration: underline; }
 .sidebar-item-value-line-border { padding: 4px 6px 4px 6px; border-top: 1px solid rgba(27, 31, 35, 0.05); }
 .sidebar-item-value-line-content { white-space: pre; word-wrap: normal; overflow: auto; display: block; }
-.sidebar-item-value-expander { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; float: right; color: #aaa; cursor: pointer; user-select: none; -webkit-user-select: none; -moz-user-select: none; padding: 4px 6px 4px 6px; }
-.sidebar-item-value-expander:hover { color: #000; }
-.sidebar-item-select {
+.sidebar-item-value-expander { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; float: right; color: #aaa; cursor: pointer; user-select: none; -webkit-user-select: none; -moz-user-select: none; padding: 4px 6px 4px 4px; }
+.sidebar-item-value-expander:hover { color: #333; }
+.sidebar-item-value-button { display: flex; justify-content: center; align-items: center; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; width: 22px; height: 22px; cursor: pointer; user-select: none; -webkit-user-select: none; -moz-user-select: none; color: #aaa; }
+.sidebar-item-value-button svg use { fill: #aaa; stroke: #aaa; }
+.sidebar-item-value-button:hover svg use { fill: #333; stroke: #333; }
+.sidebar-item-value-button-tool { float: right; padding-left: 3px; }
+.sidebar-item-value-button-context { float: right; }
+.sidebar-item-selector {
     font-family: inherit; font-size: 12px;
     background-color: #fcfcfc; border: #fcfcfc; color: #333;
     border-radius: 2px; width: 100%; height: 23px; padding: 3px 12px 3px 7px;
@@ -212,10 +239,18 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
     background-repeat: no-repeat;
 }
 .sidebar-separator { margin-bottom: 20px; }
-.sidebar-find-search { font-family: inherit; font-size: 13px; margin: 0px 20px 8px 20px; padding: 8px 16px 8px 16px; background: #fff; border-radius: 16px; border: 0; outline: 0; }
-.sidebar-find-content { flex-grow: 1; padding: 0px 20px 20px 20px; padding-right: 20px; overflow-y: auto; list-style-type: none; overflow-y: auto; margin: 0; }
-.sidebar-find-content li { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, Courier, monospace; font-size: 12px; margin: 0; padding: 5px 8px 5px 18px; outline: 0; white-space: nowrap; user-select: none; -webkit-user-select: none; -moz-user-select: none; }
-.sidebar-find-content li:hover { background: #e5e5e5; }
+.sidebar-find-search { display: flex; align-items: center; background: #fff; border-radius: 16px; margin: 0px 20px 8px 20px; padding: 0px 8px 0px 8px; }
+.sidebar-find-query { width: 100vw; background: none; font-family: inherit; font-size: 13px; padding: 8px 8px 8px 8px; border: 0; outline: 0; }
+.sidebar-find-toggle { margin-left: auto; margin-right: 2px; width: 16px; height: 16px; cursor: pointer; }
+.sidebar-find-toggle input[type="checkbox"] { display: none; }
+.sidebar-find-toggle input[type="checkbox"]:not(:checked) + svg { fill: #ccc; stroke: #ccc; }
+.sidebar-find-toggle input[type="checkbox"]:checked + svg { fill: #555; stroke: #555; }
+.sidebar-find-toggle-icon { stroke: #555; fill: #555; width: 16px; height: 16px; }
+.sidebar-find-content { flex-grow: 1; padding: 0px 20px 20px 20px; overflow-y: auto; list-style-type: none; margin: 0; }
+.sidebar-find-content li *:first-child { margin-right: 2px; }
+.sidebar-find-content li { color: #666; font-size: 13px; height: 22px; line-height: 22px; padding: 0 12px 0 12px; outline: 0; white-space: nowrap; border-radius: 3px; user-select: none; -webkit-user-select: none; -moz-user-select: none; }
+.sidebar-find-content li:hover { background: #e5e5e5; color: #000; }
+.sidebar-find-content-icon { stroke: #555; fill: #555; float: left; width: 16px; height: 16px; padding: 3px; }
 .sidebar-documentation { flex-grow: 1; padding: 0px 20px 20px 20px; overflow-y: auto; font-size: 13px; line-height: 1.5; margin: 0; }
 .sidebar-documentation h1 { font-weight: bold; font-size: 13px; line-height: 1.25; border-bottom: 1px solid #e8e8e8; padding-bottom: 0.3em; margin-top: 0; margin-bottom: 16px; }
 .sidebar-documentation h2 { font-weight: bold; font-size: 13px; line-height: 1.25; margin-top: 20px; margin-bottom: 16px; text-transform: uppercase; border: 0; }
@@ -236,9 +271,10 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
     .sidebar-closebutton { padding: 8px 8px 8px 32px; text-decoration: none; font-size: 25px; color: #777777; opacity: 1.0; display: block; transition: 0.2s; position: absolute; top: 0; right: 15px; margin-left: 50px; user-select: none; -webkit-user-select: none; -moz-user-select: none; }
     .sidebar-closebutton:hover { color: #ffffff; }
     .sidebar-item-value { background-color: #383838; border-color: #383838; }
-    .sidebar-item-value-dark { background-color: #3e3e3e; border-color: #3e3e3e; }
+    .sidebar-item-value-content { background-color: #3e3e3e; border-color: #3e3e3e; }
     .sidebar-item-value-line-border { border-color: rgba(0, 0, 0, 0.09); }
-    .sidebar-item-select { background-color: #383838; border: #383838; color: #dfdfdf; background-image: linear-gradient(45deg, transparent 50%, #aaa 50%), linear-gradient(135deg, #aaa 50%, transparent 50%); }
+    .sidebar-item-selector { background-color: #383838; border: #383838; color: #dfdfdf; background-image: linear-gradient(45deg, transparent 50%, #aaa 50%), linear-gradient(135deg, #aaa 50%, transparent 50%); }
+    .sidebar-item-disable-select { user-select: none; -webkit-user-select: none; -moz-user-select: none; }
     .sidebar-header { border-bottom-color: #2d2d2d; color: #dfdfdf; }
     .sidebar-documentation h1 { border-bottom: 1px solid #424242; color: #dfdfdf; }
     .sidebar-documentation h2 { color: #dfdfdf; }
@@ -248,7 +284,16 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
     .sidebar-documentation code { background-color: #1e1e1e; }
     .sidebar-documentation pre { background-color: #1e1e1e; }
     .sidebar-find-search { background: #383838; color: #dfdfdf; border-color: #424242; }
-    .sidebar-find-content li:hover { background: #383838; }
+    .sidebar-find-toggle input[type="checkbox"]:not(:checked) + svg { fill: #555; stroke: #555; }
+    .sidebar-find-toggle input[type="checkbox"]:checked + svg { fill: #aaa; stroke: #aaa; }
+    .sidebar-find-content li { color: #aaaaaa; }
+    .sidebar-find-content li:hover { background: #383838; color: #dfdfdf; }
+    .sidebar-find-content-icon { stroke: #888888; fill: #888888; }
+    .sidebar-item-value-expander { color: #888; }
+    .sidebar-item-value-expander:hover { color: #e5e5e5; }
+    .sidebar-item-value-button { color: #888; }
+    .sidebar-item-value-button svg use { fill: #888; stroke: #888; }
+    .sidebar-item-value-button:hover svg use { fill: #e5e5e5; stroke: #e5e5e5; }
 }
 @media screen and (prefers-reduced-motion: reduce) {
 .menu { transition: none; }
@@ -264,26 +309,30 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
     <h1 id="sidebar-title" class="sidebar-title"></h1>
     <a id="sidebar-closebutton" class="sidebar-closebutton" href="javascript:void(0)" draggable="false">&times;</a>
     <div id="sidebar-content" class="sidebar-content"></div>
+    <svg width="0" height="0" display="none">
+        <defs>
+            <symbol id="sidebar-icon-node" viewBox="0 0 20 20">
+                <circle cx="10" cy="10" r="6" stroke-width="2" fill="none"/>
+            </symbol>
+            <symbol id="sidebar-icon-connection" viewBox="0 0 20 20">
+                <line x1="4" y1="10" x2="15" y2="10" stroke-width="2" />
+                <polyline points="11,6 15,10 11,14" stroke-width="2" />
+            </symbol>
+            <symbol id="sidebar-icon-weight" viewBox="0 0 20 20">
+                <circle cx="5" cy="5" r="1" />
+                <circle cx="10" cy="5" r="1" />
+                <circle cx="15" cy="5" r="1" />
+                <circle cx="5" cy="10" r="1" />
+                <circle cx="10" cy="10" r="1" />
+                <circle cx="15" cy="10" r="1" />
+                <circle cx="5" cy="15" r="1" />
+                <circle cx="10" cy="15" r="1" />
+                <circle cx="15" cy="15" r="1" />
+          </symbol>
+        </defs>
+    </svg>
 </div>
 <div id="toolbar" class="toolbar">
-    <button id="sidebar-button" class="toolbar-button" title="Model Properties">
-        <svg class="toolbar-icon" viewbox="0 0 100 100">
-            <rect class="border" x="12" y="12" width="76" height="76" rx="16" ry="16" stroke-width="8"></rect>
-            <line class="border" x1="28" y1="37" x2="32" y2="37" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
-            <line class="border" x1="28" y1="50" x2="32" y2="50" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
-            <line class="border" x1="28" y1="63" x2="32" y2="63" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
-            <line class="border" x1="40" y1="37" x2="70" y2="37" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
-            <line class="border" x1="40" y1="50" x2="70" y2="50" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
-            <line class="border" x1="40" y1="63" x2="70" y2="63" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
-            <rect class="stroke" x="12" y="12" width="76" height="76" rx="16" ry="16" stroke-width="4"></rect>
-            <line class="stroke" x1="28" y1="37" x2="32" y2="37" stroke-width="4" stroke-linecap="round"></line>
-            <line class="stroke" x1="28" y1="50" x2="32" y2="50" stroke-width="4" stroke-linecap="round"></line>
-            <line class="stroke" x1="28" y1="63" x2="32" y2="63" stroke-width="4" stroke-linecap="round"></line>
-            <line class="stroke" x1="40" y1="37" x2="70" y2="37" stroke-width="4" stroke-linecap="round"></line>
-            <line class="stroke" x1="40" y1="50" x2="70" y2="50" stroke-width="4" stroke-linecap="round"></line>
-            <line class="stroke" x1="40" y1="63" x2="70" y2="63" stroke-width="4" stroke-linecap="round"></line>
-        </svg>
-    </button>
     <button id="zoom-in-button" class="toolbar-button" title="Zoom In">
         <svg class="toolbar-icon" viewbox="0 0 100 100">
             <circle class="border" cx="50" cy="50" r="35" stroke-width="8" stroke="#fff"></circle>
@@ -306,6 +355,53 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
             <line class="stroke" x1="78" y1="78" x2="82" y2="82" stroke-width="8" stroke-linecap="square"></line>
         </svg>
     </button>
+    <button id="sidebar-document-button" class="toolbar-button" title="Model Properties">
+        <svg class="toolbar-icon" viewbox="0 0 100 100">
+            <rect class="border" x="12" y="12" width="76" height="76" rx="16" ry="16" stroke-width="8"></rect>
+            <line class="border" x1="28" y1="37" x2="32" y2="37" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
+            <line class="border" x1="28" y1="50" x2="32" y2="50" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
+            <line class="border" x1="28" y1="63" x2="32" y2="63" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
+            <line class="border" x1="40" y1="37" x2="70" y2="37" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
+            <line class="border" x1="40" y1="50" x2="70" y2="50" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
+            <line class="border" x1="40" y1="63" x2="70" y2="63" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
+            <rect class="stroke" x="12" y="12" width="76" height="76" rx="16" ry="16" stroke-width="4"></rect>
+            <line class="stroke" x1="28" y1="37" x2="32" y2="37" stroke-width="4" stroke-linecap="round"></line>
+            <line class="stroke" x1="28" y1="50" x2="32" y2="50" stroke-width="4" stroke-linecap="round"></line>
+            <line class="stroke" x1="28" y1="63" x2="32" y2="63" stroke-width="4" stroke-linecap="round"></line>
+            <line class="stroke" x1="40" y1="37" x2="70" y2="37" stroke-width="4" stroke-linecap="round"></line>
+            <line class="stroke" x1="40" y1="50" x2="70" y2="50" stroke-width="4" stroke-linecap="round"></line>
+            <line class="stroke" x1="40" y1="63" x2="70" y2="63" stroke-width="4" stroke-linecap="round"></line>
+        </svg>
+    </button>
+    <button id="sidebar-target-button" class="toolbar-button" title="Target Properties">
+        <svg class="toolbar-icon" viewBox="0 0 100 100">
+            <rect class="border" x="12" y="12" width="76" height="76" rx="16" ry="16" stroke-width="8"></rect>
+            <circle class="border" cx="35" cy="50" r="8" stroke-width="8"></circle>
+            <circle class="border" cx="65" cy="35" r="8" stroke-width="8"></circle>
+            <circle class="border" cx="65" cy="65" r="8" stroke-width="8"></circle>
+            <line class="border" x1="41.6" y1="46.8" x2="58.4" y2="38.2" stroke-width="8" />
+            <line class="border" x1="41.6" y1="53.2" x2="58.4" y2="61.8" stroke-width="8" />
+            <rect class="stroke" x="12" y="12" width="76" height="76" rx="16" ry="16" stroke-width="4"></rect>
+            <circle class="stroke fill" cx="35" cy="50" r="8" stroke-width="4"></circle>
+            <circle class="stroke fill" cx="65" cy="35" r="8" stroke-width="4"></circle>
+            <circle class="stroke fill" cx="65" cy="65" r="8" stroke-width="4"></circle>
+            <line class="stroke" x1="41.6" y1="46.8" x2="58.4" y2="38.2" stroke-width="4" />
+            <line class="stroke" x1="41.6" y1="53.2" x2="58.4" y2="61.8" stroke-width="4" />
+        </svg>
+    </button>
+    <div id="toolbar-navigator" class="toolbar-select">
+        <select id="toolbar-target-selector">
+            <option value="Graphs" disabled="true">&#x2014; Graphs &#x2014;&#x2014;</option>
+            <option value="add">add</option>
+            <option value="subtract">subtract</option>
+            <option value="multiply">multiply</option>
+            <option value="Functions" disabled="true">&#x2014; Functions &#x2014;&#x2014;</option>
+            <option value="line">foo_bar.foo</option>
+        </select>
+        <svg class="toolbar-select-arrow" viewBox="0 0 10 6" width="10" height="6">
+            <path d="M0 0L5 6L10 0Z" />
+        </svg>
+    </div>
     <div id="toolbar-path" class="toolbar-path">
         <button id="toolbar-path-back-button" class="toolbar-path-back-button" title="Back">
             &#x276E;
@@ -464,9 +560,9 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
     <div style="font-weight: bold; color: rgba(0, 0, 0, 0.01); user-select: none;">.</div>
     <div style="font-weight: bold; color: rgba(0, 0, 0, 0.01); user-select: none;">.</div>
 </div>
-<div id="message-dialog" class="center message-dialog">
-    <span id="message-text" class="center message-text"></span>
-    <button id="message-button" class="center logo-button message-button" tabindex="0">Accept</button>
+<div id="message" class="message">
+    <div id="message-text" class="message-text"></div>
+    <button id="message-button" class="logo-button message-button" tabindex="0">OK</button>
 </div>
 <div id="titlebar" class="titlebar">
     <svg style="position: absolute; width: 0px; height: 0px; overflow: hidden;" aria-hidden="true">

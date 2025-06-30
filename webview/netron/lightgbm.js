@@ -5,25 +5,23 @@ const lightgbm = {};
 
 lightgbm.ModelFactory = class {
 
-    match(context) {
+    async match(context) {
         const stream = context.stream;
         const signature = [0x74, 0x72, 0x65, 0x65, 0x0A];
         if (stream && stream.length >= signature.length && stream.peek(signature.length).every((value, index) => value === signature[index])) {
-            context.type = 'lightgbm.text';
-            return;
+            return context.set('lightgbm.text');
         }
-        const obj = context.peek('pkl');
+        const obj = await context.peek('pkl');
         if (obj && obj.__class__ && obj.__class__.__module__ && obj.__class__.__module__.startsWith('lightgbm.')) {
-            context.type = 'lightgbm.pickle';
-            context.target = obj;
-            return;
+            return context.set('lightgbm.pickle', obj);
         }
+        return null;
     }
 
     async open(context) {
         switch (context.type) {
             case 'lightgbm.pickle': {
-                const obj = context.target;
+                const obj = context.value;
                 return new lightgbm.Model(obj, 'LightGBM Pickle');
             }
             case 'lightgbm.text': {
@@ -76,9 +74,10 @@ lightgbm.Graph = class {
 
 lightgbm.Argument = class {
 
-    constructor(name, value) {
+    constructor(name, value, type) {
         this.name = name;
         this.value = value;
+        this.type = type || null;
     }
 };
 
@@ -123,29 +122,20 @@ lightgbm.Node = class {
                     stack.delete(obj);
                     return node;
                 });
-                const attribute = new lightgbm.Attribute('object[]', key, nodes);
+                const attribute = new lightgbm.Argument(key, nodes, 'object[]');
                 this.attributes.push(attribute);
                 continue;
             } else if (isObject(value) && !stack.has(value)) {
                 stack.add(obj);
                 const node = new lightgbm.Node(obj, null, stack);
                 stack.delete(obj);
-                const attribute = new lightgbm.Attribute('object', key, node);
+                const attribute = new lightgbm.Argument(key, node, 'object');
                 this.attributes.push(attribute);
             } else {
-                const attribute = new lightgbm.Attribute(null, key, value);
+                const attribute = new lightgbm.Argument(key, value);
                 this.attributes.push(attribute);
             }
         }
-    }
-};
-
-lightgbm.Attribute = class {
-
-    constructor(type, name, value) {
-        this.type = type;
-        this.name = name;
-        this.value = value;
     }
 };
 

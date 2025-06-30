@@ -5,16 +5,16 @@ const kmodel = {};
 
 kmodel.ModelFactory = class {
 
-    match(context) {
+    async match(context) {
         const reader = kmodel.Reader.open(context.stream);
         if (reader) {
-            context.type = 'kmodel';
-            context.target = reader;
+            return context.set('kmodel', reader);
         }
+        return null;
     }
 
     async open(context) {
-        const target = context.target;
+        const target = context.value;
         target.read();
         return new kmodel.Model(target);
     }
@@ -32,7 +32,7 @@ kmodel.Graph = class {
 
     constructor(module) {
         this.name = module.name || '';
-        this.type = module.type || '';
+        this.description = module.type || '';
         this.inputs = [];
         this.outputs = [];
         this.nodes = [];
@@ -194,7 +194,7 @@ kmodel.Tensor = class {
 kmodel.Node = class {
 
     constructor(layer, value) {
-        this.location = layer.location !== undefined ? layer.location.toString() : layer.location;
+        this.identifier = layer.location === undefined ? layer.location : layer.location.toString();
         this.name = '';
         this.type = layer.type;
         this.inputs = [];
@@ -206,7 +206,7 @@ kmodel.Node = class {
             if (name === 'type' || name === 'location' || name === 'inputs' || name === 'outputs' || name === 'chain') {
                 continue;
             }
-            const attribute = new kmodel.Attribute(name, value);
+            const attribute = new kmodel.Argument(name, value);
             this.attributes.push(attribute);
         }
         for (const input of layer.inputs || []) {
@@ -223,14 +223,6 @@ kmodel.Node = class {
             const node = new kmodel.Node(chain, value);
             this.chain.push(node);
         }
-    }
-};
-
-kmodel.Attribute = class {
-
-    constructor(name, value) {
-        this.name = name;
-        this.value = value;
     }
 };
 
@@ -265,7 +257,7 @@ kmodel.Reader = class {
         }
         const types = new Map();
         const register = (type, name, category, callback) => {
-            types.set(type, { type: { name: name, category: category || '' }, callback: callback });
+            types.set(type, { type: { name, category: category || '' }, callback });
         };
         switch (this.version) {
             case 3: {
@@ -541,7 +533,7 @@ kmodel.Reader = class {
                 }
                 this.modules.push({
                     name: '',
-                    layers: layers
+                    layers
                 });
                 break;
             }
@@ -908,7 +900,7 @@ kmodel.Reader = class {
                 }
                 this.modules.push({
                     name: '',
-                    layers: layers
+                    layers
                 });
                 break;
             }
@@ -968,8 +960,8 @@ kmodel.Reader = class {
                         function_headers[i] = function_header;
                         functions[i] = {
                             type: { name: 'Unknown' },
-                            inputs: inputs,
-                            outputs: outputs
+                            inputs,
+                            outputs
                         };
                     }
                     const sections = new Map();
@@ -1004,7 +996,7 @@ kmodel.Reader = class {
                     }
                     const name = this.modules.length > 1 ? i.toString() : '';
                     this.modules[i] = {
-                        name: name,
+                        name,
                         type: module_header.type,
                         layers: functions
                     };
@@ -1043,6 +1035,10 @@ kmodel.BinaryReader = class {
 
     read(length) {
         return this._reader.read(length);
+    }
+
+    boolean() {
+        return this._reader.boolean();
     }
 
     byte() {
@@ -1089,7 +1085,7 @@ kmodel.BinaryReader = class {
                 const offset = (position / 8) >> 0;
                 const start = (position & 7);
                 const count = Math.min((offset + 1) * 8, end) - position;
-                value = value | ((buffer[offset] >>> start) & ((1 << count) - 1)) << (position - fields[i][1]);
+                value |= ((buffer[offset] >>> start) & ((1 << count) - 1)) << (position - fields[i][1]);
                 position += count;
             }
             obj[key] = value;
@@ -1137,7 +1133,7 @@ kmodel.BinaryReader.v3 = class extends kmodel.BinaryReader {
     }
 
     parameter(name, memory_type) {
-        return { name: name, value: [this.argument(memory_type)] };
+        return { name, value: [this.argument(memory_type)] };
     }
 };
 
@@ -1187,7 +1183,7 @@ kmodel.BinaryReader.v4 = class extends kmodel.BinaryReader {
     }
 
     parameter(name) {
-        return { name: name, value: [this.argument()] };
+        return { name, value: [this.argument()] };
     }
 
     runtime_shape_t() {
@@ -1380,7 +1376,7 @@ kmodel.BinaryReader.v5 = class extends kmodel.BinaryReader {
     }
 
     parameter(name) {
-        return { name: name, value: [this.argument()] };
+        return { name, value: [this.argument()] };
     }
 
     shape() {

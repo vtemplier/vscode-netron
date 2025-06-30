@@ -99,11 +99,11 @@
     ]
   },
   {
-    "name": "DequantizeLayer"
+    "name": "DequantizeLayer",
+    "category": "Quantization"
   },
   {
     "name": "DetectionPostProcessLayer",
-    "category": "Custom",
     "attributes": [
       { "name": "maxDetections", "type": "uint32" },
       { "name": "maxClassesPerDetection", "type": "uint32" },
@@ -148,8 +148,7 @@
   },
   {
     "name": "GreaterLayer",
-    "category": "Layer",
-    "attributes": []
+    "category": "Layer"
   },
   {
     "name": "InputLayer"
@@ -305,7 +304,8 @@
     ]
   },
   {
-    "name": "QuantizeLayer"
+    "name": "QuantizeLayer",
+    "category": "Quantization"
   },
   {
     "name": "ReshapeLayer",

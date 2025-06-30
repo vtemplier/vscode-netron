@@ -3,16 +3,16 @@ const hickle = {};
 
 hickle.ModelFactory = class {
 
-    match(context) {
-        const group = context.peek('hdf5');
+    async match(context) {
+        const group = await context.peek('hdf5');
         if (group && group.attributes && group.attributes.get('CLASS') === 'hickle') {
-            context.type = 'hickle';
-            context.target = group;
+            return context.set('hickle', group);
         }
+        return null;
     }
 
     async open(context) {
-        return new hickle.Model(context.target);
+        return new hickle.Model(context.value);
     }
 };
 
@@ -93,7 +93,7 @@ hickle.Value = class {
         if (typeof name !== 'string') {
             throw new hickle.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
-        this.name= name;
+        this.name = name;
         this.type = !type && initializer ? initializer.type : type;
         this.initializer = initializer || null;
     }

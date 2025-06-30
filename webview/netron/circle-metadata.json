@@ -198,6 +198,7 @@
   },
   {
     "name": "Dequantize",
+    "category": "Quantization",
     "inputs": [
       { "name": "input" }
     ],
@@ -599,6 +600,7 @@
   },
   {
     "name": "Quantize",
+    "category": "Quantization",
     "inputs": [
       { "name": "input" }
     ],
@@ -714,6 +716,13 @@
     "attributes": [
       { "name": "seq_dim", "type": "int32", "default": 0 },
       { "name": "batch_dim", "type": "int32", "default": 0 }
+    ]
+  },
+  {
+    "name": "RmsNorm",
+    "attributes": [
+      { "name": "epsilon", "type": "float32", "default": 0 },
+      { "name": "fused_activation_function", "type": "ActivationFunctionType", "default": "NONE" }
     ]
   },
   {

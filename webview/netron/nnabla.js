@@ -1,18 +1,17 @@
 
-import * as text from './text.js';
-
 const nnabla = {};
 
 nnabla.ModelFactory = class {
 
-    match(context) {
+    async match(context) {
         const identifier = context.identifier;
         if (identifier.endsWith('.nntxt')) {
-            const tags = context.tags('pbtxt');
+            const tags = await context.tags('pbtxt');
             if (tags.has('network')) {
-                context.type = 'nnabla.pbtxt';
+                return context.set('nnabla.pbtxt');
             }
         }
+        return null;
     }
 
     async open(context) {
@@ -20,37 +19,66 @@ nnabla.ModelFactory = class {
         nnabla.proto = nnabla.proto.nnabla;
         switch (context.type) {
             case 'nnabla.pbtxt': {
-                const reader = context.read('protobuf.text');
+                const reader = await context.read('protobuf.text');
                 const model = nnabla.proto.NNablaProtoBuf.decodeText(reader);
-                const open = async (model, version) => {
-                    const metadata = await context.metadata('nnabla-metadata.json');
-                    return new nnabla.Model(metadata, model, `NNabla${version ? ` v${version}` : ''}`);
-                };
-                try {
-                    const contexts = await Promise.all([
-                        context.fetch('nnp_version.txt'),
-                        context.fetch('parameter.protobuf')
-                    ]);
-                    const version = text.Reader.open(contexts[0].stream).read();
-                    const reader = contexts[1].read('protobuf.binary');
+                const files = ['nnp_version.txt', 'parameter.protobuf', 'parameter.h5'];
+                let contexts = await Promise.all(files.map((file) => context.fetch(file).catch(() => null)));
+                contexts = contexts.filter((context) => context !== null);
+                contexts = new Map(contexts.map((context) => [context.identifier, context]));
+                let version = '';
+                if (contexts.has('nnp_version.txt')) {
+                    const context = contexts.get('nnp_version.txt');
+                    const reader = await context.read('text');
+                    const line = reader.read('\n');
+                    version = line.split('\r').shift();
+                }
+                if (contexts.has('parameter.protobuf')) {
+                    const context = contexts.get('parameter.protobuf');
+                    const reader = await context.read('protobuf.binary');
                     const params = nnabla.proto.NNablaProtoBuf.decode(reader);
                     model.parameter = params.parameter;
-                    return await open(model, version);
-                } catch (error) {
-                    return await open(model);
+                } else if (contexts.has('parameter.h5')) {
+                    const context = contexts.get('parameter.h5');
+                    const file = await context.read('hdf5');
+                    const queue = [['',file]];
+                    while (queue.length > 0) {
+                        const [name, group] = queue.shift();
+                        if (group.value) {
+                            const variable = group.value;
+                            const data = variable.data.peek();
+                            const buffer = new Uint8Array(data.length);
+                            buffer.set(data, 0);
+                            const parameter = new nnabla.proto.Parameter();
+                            parameter.variable_name = name;
+                            parameter.shape = new nnabla.proto.Shape();
+                            parameter.shape.dim = variable.shape.map((dim) => BigInt(dim));
+                            parameter.data = new Float32Array(buffer.buffer, buffer.byteOffset, buffer.byteLength >> 2);
+                            model.parameter.push(parameter);
+                        } else {
+                            for (const [key, value] of group.groups) {
+                                queue.push([name ? `${name}/${key}` : key, value]);
+                            }
+                        }
+                    }
                 }
+                const metadata = await context.metadata('nnabla-metadata.json');
+                return new nnabla.Model(metadata, model, version);
             }
             default: {
                 throw new nnabla.Error(`Unsupported nnabla format '${context.type}'.`);
             }
         }
     }
+
+    filter(context, type) {
+        return context.type !== 'nnabla.pbtxt' || (type !== 'hdf5.parameter.h5' && type !== 'keras.h5');
+    }
 };
 
 nnabla.Model = class {
 
-    constructor(metadata, model, format) {
-        this.format = format;
+    constructor(metadata, model, version) {
+        this.format = `NNabla${version ? ` v${version}` : ''}`;
         this.graphs = [];
         const tensors = new Map(model.parameter.map((parameter) => {
             const name = parameter.variable_name;
@@ -112,7 +140,18 @@ nnabla.Graph = class {
         this.nodes = network.function.map((func) => {
             const parameters = get_parameters(func) || [];
             const attributes = Object.entries(parameters).map(([name, value]) => {
-                return new nnabla.Attribute(metadata, func.type, name, value);
+                const attribute = metadata.attribute(func.type, name);
+                let type = attribute.type;
+                switch (type) {
+                    case 'shape':
+                        type = "int64[]";
+                        value = value.dim;
+                        break;
+                    default:
+                        break;
+                }
+                const visible = attribute.default !== undefined && value === attribute.default ? false : true;
+                return new nnabla.Argument(name, value, type, visible);
             });
             const func_type = metadata.type(func.type);
             const inputs = [];
@@ -140,36 +179,20 @@ nnabla.Graph = class {
 
 nnabla.Argument = class {
 
-    constructor(name, value) {
+    constructor(name, value, type, visible) {
         this.name = name;
         this.value = value;
+        this.type = type || null;
+        this.visible = visible !== false;
     }
 };
 
 nnabla.Value = class {
 
     constructor(name, type, initializer) {
-        this._name = name;
-        this._type = type || null;
-        this._initializer = initializer || null;
-    }
-
-    get name() {
-        return this._name;
-    }
-
-    get type() {
-        if (this._type) {
-            return this._type;
-        }
-        if (this._initializer) {
-            return this._initializer.type;
-        }
-        return null;
-    }
-
-    get initializer() {
-        return this._initializer;
+        this.name = name;
+        this.type = !type && initializer && initializer.type ? initializer.type : type;
+        this.initializer = initializer || null;
     }
 };
 
@@ -181,7 +204,7 @@ nnabla.Node = class {
         this.attributes = attributes || [];
         this.outputs = outputs || [];
         this.chain = [];
-        // TODO: "nonlinearity" does not match metadata type
+        // "nonlinearity" does not match metadata type
         const get_nonlinearity = (name) => {
             switch (name) {
                 case "identity": return "Identity";
@@ -224,41 +247,16 @@ nnabla.Node = class {
     }
 };
 
-nnabla.Attribute = class {
-
-    constructor(metadata, type, name, value) {
-        this.name = name;
-        const attribute = metadata.attribute(type, name);
-        this.description = attribute.description;
-        switch (attribute.type) {
-            case "shape":
-                this.type = "int64[]";
-                this.value = value.dim;
-                break;
-            default:
-                this.type = attribute.type;
-                this.value = value;
-                break;
-        }
-        if (Object.prototype.hasOwnProperty.call(attribute, 'default') && this.value === attribute.default) {
-            this.visible = false;
-        }
-    }
-};
-
 nnabla.Tensor = class {
 
     constructor(name, type, values) {
         this.name = name;
         this.type = type;
         this.encoding = '|';
-        this._values = values;
-    }
-
-    get values() {
+        this.values = values;
         const dataType = this.type.dataType;
         switch (dataType) {
-            case 'float32': return new Float32Array(this._values);
+            case 'float32': this.values = new Float32Array(this.values); break;
             default: throw new nnabla.Error(`Unsupported data type '${dataType}'.`);
         }
     }
@@ -279,11 +277,14 @@ nnabla.TensorType = class {
 nnabla.TensorShape = class {
 
     constructor(dimensions) {
-        this.dimensions = dimensions;
+        this.dimensions = dimensions.map((dim) => typeof dim === 'bigint' ? dim.toNumber() : dim);
     }
 
     toString() {
-        return (this.dimensions && this.dimensions.length) ? (`[${this.dimensions.join(',')}]`) : '';
+        if (Array.isArray(this.dimensions) && this.dimensions.length > 0) {
+            return `[${this.dimensions.join(',')}]`;
+        }
+        return '';
     }
 };
 

@@ -11,7 +11,7 @@ CNTK.proto.NDShape = class NDShape {
 
     static decode(reader, length) {
         const message = new CNTK.proto.NDShape();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -29,12 +29,9 @@ CNTK.proto.NDShape = class NDShape {
 
 CNTK.proto.Axis = class Axis {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new CNTK.proto.Axis();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -62,9 +59,6 @@ CNTK.proto.Axis.prototype.is_ordered_dynamic_axis = false;
 
 CNTK.proto.NDArrayView = class NDArrayView {
 
-    constructor() {
-    }
-
     get values() {
         CNTK.proto.NDArrayView.valuesSet = CNTK.proto.NDArrayView.valuesSet || new Set(["float_values", "double_values", "bytes_value", "sint32_values"]);
         return Object.keys(this).find((key) => CNTK.proto.NDArrayView.valuesSet.has(key) && this[key] !== null);
@@ -72,7 +66,7 @@ CNTK.proto.NDArrayView = class NDArrayView {
 
     static decode(reader, length) {
         const message = new CNTK.proto.NDArrayView();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -133,7 +127,7 @@ CNTK.proto.NDArrayView.FloatValues = class FloatValues {
 
     static decode(reader, length) {
         const message = new CNTK.proto.NDArrayView.FloatValues();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -157,7 +151,7 @@ CNTK.proto.NDArrayView.DoubleValues = class DoubleValues {
 
     static decode(reader, length) {
         const message = new CNTK.proto.NDArrayView.DoubleValues();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -175,12 +169,9 @@ CNTK.proto.NDArrayView.DoubleValues = class DoubleValues {
 
 CNTK.proto.NDArrayView.BytesValue = class BytesValue {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new CNTK.proto.NDArrayView.BytesValue();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -206,7 +197,7 @@ CNTK.proto.NDArrayView.IntValues = class IntValues {
 
     static decode(reader, length) {
         const message = new CNTK.proto.NDArrayView.IntValues();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -230,7 +221,7 @@ CNTK.proto.Vector = class Vector {
 
     static decode(reader, length) {
         const message = new CNTK.proto.Vector();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -254,7 +245,7 @@ CNTK.proto.Dictionary = class Dictionary {
 
     static decode(reader, length) {
         const message = new CNTK.proto.Dictionary();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -277,9 +268,6 @@ CNTK.proto.Dictionary.prototype.version = 0n;
 
 CNTK.proto.DictionaryValue = class DictionaryValue {
 
-    constructor() {
-    }
-
     get value() {
         CNTK.proto.DictionaryValue.valueSet = CNTK.proto.DictionaryValue.valueSet || new Set(["bool_value", "int_value", "size_t_value", "float_value", "double_value", "string_value", "nd_shape_value", "axis_value", "vector_value", "dictionary_value", "nd_array_view_value"]);
         return Object.keys(this).find((key) => CNTK.proto.DictionaryValue.valueSet.has(key) && this[key] !== null);
@@ -287,7 +275,7 @@ CNTK.proto.DictionaryValue = class DictionaryValue {
 
     static decode(reader, length) {
         const message = new CNTK.proto.DictionaryValue();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {

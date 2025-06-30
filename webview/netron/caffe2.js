@@ -3,47 +3,56 @@ const caffe2 = {};
 
 caffe2.ModelFactory = class {
 
-    match(context) {
+    async match(context) {
         const identifier = context.identifier.toLowerCase();
-        const extension = identifier.split('.').pop().toLowerCase();
-        if (extension === 'pb') {
-            const tags = context.tags('pb');
-            if (tags.size > 0 &&
-                Array.from(tags.keys()).every((tag) => tag <= 9) &&
-                Array.from(tags.values()).every((type) => type <= 4)) {
-                if (tags.size === 1 && tags.get(2) === 2 && identifier.endsWith('saved_model.pb')) {
-                    return;
+        const extension = identifier.lastIndexOf('.') > 0 ? identifier.split('.').pop().toLowerCase() : '';
+        switch (extension) {
+            case 'pbtxt':
+            case 'prototxt': {
+                const tags = await context.tags('pbtxt');
+                if (tags.has('op') && !tags.has('op.attr') && !tags.has('op.graph_op_name') && !tags.has('op.endpoint')) {
+                    return context.set('caffe2.pbtxt');
                 }
-                const schema = [[1,2],[2,2],[3,2],[4,0],[5,2],[6,2],[7,2],[8,2],[9,2]];
-                if (schema.every(([key, value]) => !tags.has(key) || tags.get(key) === value)) {
-                    const stream = context.stream;
-                    if (stream.length > 3) {
-                        const buffer = stream.peek(Math.min(stream.length, 67));
-                        const [signature, size] = buffer;
-                        if (signature === 0x0A) {
-                            if (size < 64 &&
-                                buffer.length > 2 + size + 1 &&
-                                buffer.slice(2, 2 + size).every((c) => c >= 32 && c <= 127) &&
-                                buffer[2 + size] === 0x12) {
-                                context.type = 'caffe2.pb';
-                                return;
+                break;
+            }
+            case 'pb': {
+                const tags = await context.tags('pb');
+                if (tags.size > 0 &&
+                    Array.from(tags.keys()).every((tag) => tag <= 9) &&
+                    Array.from(tags.values()).every((type) => type <= 4)) {
+                    if (tags.size === 1 && tags.get(2) === 2 && identifier.endsWith('saved_model.pb')) {
+                        return null;
+                    }
+                    const schema = [[1,2],[2,2],[3,2],[4,0],[5,2],[6,2],[7,2],[8,2],[9,2]];
+                    if (schema.every(([key, value]) => !tags.has(key) || tags.get(key) === value)) {
+                        const stream = context.stream;
+                        if (stream.length > 3) {
+                            const buffer = stream.peek(Math.min(stream.length, 67));
+                            const [signature, size] = buffer;
+                            switch (signature) {
+                                case 0x0A:
+                                    if (size < 64 &&
+                                        buffer.length > 2 + size + 1 &&
+                                        buffer.slice(2, 2 + size).every((c) => c >= 32 && c <= 127) &&
+                                        buffer[2 + size] === 0x12) {
+                                        return context.set('caffe2.pb');
+                                    }
+                                    break;
+                                case 0x12:
+                                    return context.set('caffe2.pb');
+                                default:
+                                    break;
                             }
-                        }
-                        if (signature === 0x12) {
-                            context.type = 'caffe2.pb';
-                            return;
                         }
                     }
                 }
+                break;
+            }
+            default: {
+                break;
             }
         }
-        if (extension === 'pbtxt' || extension === 'prototxt') {
-            const tags = context.tags('pbtxt');
-            if (tags.has('op') && !tags.has('op.attr') && !tags.has('op.graph_op_name') && !tags.has('op.endpoint')) {
-                context.type = 'caffe2.pbtxt';
-                return;
-            }
-        }
+        return null;
     }
 
     async open(context) {
@@ -54,140 +63,140 @@ caffe2.ModelFactory = class {
         const parts = identifier.split('.');
         const extension = parts.pop().toLowerCase();
         const base = parts.join('.');
+        let predict = null;
+        let init = null;
         switch (context.type) {
             case 'caffe2.pbtxt': {
-                const openText = (predictContext, initContext, initTextFormat) => {
-                    let predict_net = null;
-                    let init_net = null;
-                    try {
-                        const reader = predictContext.read('protobuf.text');
-                        reader.field = function(tag, message) {
-                            if (message instanceof caffe2.proto.DeviceOption) {
-                                message[tag] = this.read();
-                                return;
-                            }
-                            throw new Error(`Unknown field '${tag}' ${this.location()}`);
-                        };
-                        predict_net = caffe2.proto.NetDef.decodeText(reader);
-                    } catch (error) {
-                        const message = error && error.message ? error.message : error.toString();
-                        throw new caffe2.Error(`File text format is not caffe2.NetDef (${message.replace(/\.$/, '')}).`);
-                    }
-                    try {
-                        if (initContext) {
-                            if (initTextFormat) {
-                                const reader = initContext.read('protobuf.text');
-                                init_net = caffe2.proto.NetDef.decodeText(reader);
-                            } else {
-                                const reader = initContext.read('protobuf.binary');
-                                init_net = caffe2.proto.NetDef.decode(reader);
-                            }
-                        }
-                    } catch (error) {
-                        // continue regardless of error
-                    }
-                    return new caffe2.Model(metadata, predict_net, init_net);
-                };
                 if (base.toLowerCase().endsWith('init_net') || base.toLowerCase().startsWith('init_net')) {
+                    init = context;
                     try {
                         const name = identifier.replace('init_net', 'predict_net');
-                        const content = await context.fetch(name);
-                        return openText(content, context, true);
-                    } catch (error) {
-                        return openText(context, null, true);
-                    }
-                }
-                if (base.toLowerCase().endsWith('predict_net') || base.toLowerCase().startsWith('predict_net')) {
-                    try {
-                        const name = identifier.replace('predict_net', 'init_net').replace(/\.pbtxt/, '.pb');
-                        const content = await context.fetch(name);
-                        return openText(context, content, false);
-                    } catch (error) {
-                        try {
-                            const name = identifier.replace('predict_net', 'init_net');
-                            const content = await context.fetch(name);
-                            return openText(context, content, true);
-                        } catch (error) {
-                            return openText(context, null, true);
-                        }
-                    }
-                }
-                try {
-                    const name = `${base}_init.pb`;
-                    const content = await context.fetch(name);
-                    return openText(context, content, false);
-                } catch (error) {
-                    return openText(context, null, false);
-                }
-            }
-            case 'caffe2.pb': {
-                const openBinary = (predictContext, initContext) => {
-                    let predict_net = null;
-                    let init_net = null;
-                    try {
-                        const reader = predictContext.read('protobuf.binary');
-                        predict_net = caffe2.proto.NetDef.decode(reader);
-                    } catch (error) {
-                        const message = error && error.message ? error.message : error.toString();
-                        throw new caffe2.Error(`File format is not caffe2.NetDef (${message.replace(/\.$/, '')}).`);
-                    }
-                    try {
-                        if (initContext) {
-                            const reader = initContext.read('protobuf.binary');
-                            init_net = caffe2.proto.NetDef.decode(reader);
-                        }
-                    } catch (error) {
+                        predict = await context.fetch(name);
+                        predict.set(context.type);
+                    } catch {
                         // continue regardless of error
                     }
-                    return new caffe2.Model(metadata, predict_net, init_net);
-                };
-                if (base.toLowerCase().endsWith('init_net')) {
+                } else if (base.toLowerCase().endsWith('predict_net') || base.toLowerCase().startsWith('predict_net')) {
+                    predict = context;
+                    const name = identifier.replace('predict_net', 'init_net');
                     try {
-                        const name = `${base.replace(/init_net$/, '')}predict_net.${extension}`;
-                        const content = await context.fetch(name);
-                        return openBinary(content, context);
-                    } catch (error) {
-                        return openBinary(context, null);
+                        init = await context.fetch(name.replace(/\.pbtxt/, '.pb'));
+                        init.set('caffe2.pb');
+                    } catch {
+                        try {
+                            init = await context.fetch(name);
+                            init.set('caffe2.pbtxt');
+                        } catch {
+                            // continue regardless of error
+                        }
+                    }
+                } else {
+                    predict = context;
+                    try {
+                        init = await context.fetch(`${base}_init.pb`);
+                        init.set('caffe2.pb');
+                    } catch {
+                        // continue regardless of error
                     }
                 }
-                if (base.toLowerCase().endsWith('_init')) {
+                break;
+            }
+            case 'caffe2.pb': {
+                if (base.toLowerCase().endsWith('init_net')) {
+                    init = context;
+                    const extensions = new Set([extension, 'pb', 'pbtxt']);
+                    for (const extension of extensions) {
+                        try {
+                            const name = `${base.replace(/init_net$/, '')}predict_net.${extension}`;
+                            /* eslint-disable no-await-in-loop */
+                            predict = await context.fetch(name);
+                            /* eslint-enable no-await-in-loop */
+                            predict.set(`caffe2.${extension}`);
+                            break;
+                        } catch {
+                            // continue regardless of error
+                        }
+                    }
+                } else if (base.toLowerCase().endsWith('_init')) {
                     try {
                         const name = `${base.replace(/_init$/, '')}.${extension}`;
-                        const content = await context.fetch(name);
-                        return openBinary(content, context);
-                    } catch (error) {
-                        return openBinary(context, null);
+                        predict = await context.fetch(name);
+                        predict.set(context.type);
+                    } catch {
+                        // continue regardless of error
                     }
-                }
-                if (base.toLowerCase().endsWith('predict_net') || base.toLowerCase().startsWith('predict_net')) {
+                } else if (base.toLowerCase().endsWith('predict_net') || base.toLowerCase().startsWith('predict_net')) {
+                    predict = context;
                     try {
                         const name = identifier.replace('predict_net', 'init_net');
-                        const content = await context.fetch(name);
-                        return openBinary(context, content);
-                    } catch (error) {
-                        return openBinary(context, null);
+                        init = await context.fetch(name);
+                        init.set(context.type);
+                    } catch {
+                        // continue regardless of error
+                    }
+                } else {
+                    predict = context;
+                    try {
+                        const file = `${base}_init.${extension}`;
+                        init = await context.fetch(file, null);
+                        init.set(context.type);
+                    } catch {
+                        // continue regardless of error
                     }
                 }
-                try {
-                    const file = `${base}_init.${extension}`;
-                    const content = await context.fetch(file, null);
-                    return openBinary(context, content);
-                } catch (error) {
-                    return openBinary(context, null);
-                }
+                break;
             }
             default: {
                 throw new caffe2.Error(`Unsupported Caffe2 format '${context.type}'.`);
             }
         }
+        if (!predict && !init) {
+            throw new caffe2.Error(`Caffe2 model does not contain predict or init data.`);
+        }
+        const open = async (context) => {
+            if (context) {
+                switch (context.type) {
+                    case 'caffe2.pb':
+                        try {
+                            const reader = await context.read('protobuf.binary');
+                            return caffe2.proto.NetDef.decode(reader);
+                        } catch (error) {
+                            const message = error && error.message ? error.message : error.toString();
+                            throw new caffe2.Error(`File format is not caffe2.NetDef (${message.replace(/\.$/, '')}).`);
+                        }
+                    case 'caffe2.pbtxt':
+                        try {
+                            const reader = await context.read('protobuf.text');
+                            reader.field = function(tag, message) {
+                                if (message instanceof caffe2.proto.DeviceOption) {
+                                    message[tag] = this.read();
+                                    return;
+                                }
+                                throw new Error(`Unknown field '${tag}' ${this.location()}`);
+                            };
+                            return caffe2.proto.NetDef.decodeText(reader);
+                        } catch (error) {
+                            const message = error && error.message ? error.message : error.toString();
+                            throw new caffe2.Error(`File format is not caffe2.NetDef (${message.replace(/\.$/, '')}).`);
+                        }
+                    default:
+                        throw new caffe2.Error(`Unsupported Caffe2 predict format '${context.type}'.`);
+                }
+            }
+            return null;
+        };
+        const predict_net = await open(predict);
+        const init_net = await open(init);
+        return new caffe2.Model(metadata, predict_net, init_net);
     }
 };
 
 caffe2.Model = class {
 
     constructor(metadata, predict_net, init_net) {
+        const net = predict_net || init_net;
         this.format = 'Caffe2';
-        this.domain = predict_net.domain || null;
+        this.domain = net.domain || null;
         const graph = new caffe2.Graph(metadata, predict_net, init_net);
         this.graphs = [graph];
     }
@@ -195,16 +204,18 @@ caffe2.Model = class {
 
 caffe2.Graph = class {
 
-    constructor(metadata, netDef, init) {
-        this.name = netDef.name || '';
-        this.type = netDef.type || '';
+    constructor(metadata, predict_net, init_net) {
+        const net = predict_net || init_net;
+        init_net = predict_net ? init_net : null;
+        this.name = net.name || '';
         this.nodes = [];
+        this.description = net.type;
         const initializers = new Set();
         const tensors = new Map();
-        for (const name of netDef.external_input) {
+        for (const name of net.external_input) {
             tensors.set(name, new caffe2.Tensor(name, {}));
         }
-        if (init) {
+        if (init_net) {
             const dataTypes = new Map([
                 ['GivenTensorFill', 'float32'],
                 ['GivenTensorDoubleFill', 'float64'],
@@ -220,11 +231,9 @@ caffe2.Graph = class {
                 ['XavierFill', null],
                 ['ConstantFill', null]
             ]);
-            for (const op of init.op) {
+            for (const op of init_net.op) {
                 if (op.output && op.output.length === 1) {
-                    /* eslint-disable prefer-destructuring */
-                    const name = op.output[0];
-                    /* eslint-enable prefer-destructuring */
+                    const [name] = op.output;
                     const tensor = {};
                     for (const arg of op.arg) {
                         tensor[arg.name] = arg;
@@ -241,19 +250,18 @@ caffe2.Graph = class {
             }
         }
         const scope = {};
-        let index = 0;
-        for (const op of netDef.op) {
+        for (let i = 0; i < net.op.length; i++) {
+            const op = net.op[i];
             op.input = op.input.map((input) => scope[input] ? scope[input] : input);
             op.output = op.output.map((output) => {
                 if (scope[output]) {
-                    const next = `${output}\n${index}`; // custom argument id
+                    const next = `${output}\n${i}`; // custom argument id
                     scope[output] = next;
                     return next;
                 }
                 scope[output] = output;
                 return output;
             });
-            index++;
         }
         const values = new Map();
         values.map = (name, type, tensor) => {
@@ -264,7 +272,7 @@ caffe2.Graph = class {
             }
             return values.get(name);
         };
-        for (const op of netDef.op) {
+        for (const op of net.op) {
             let index = 0;
             for (const name of op.input) {
                 if (index > 0 && tensors.has(name)) {
@@ -276,7 +284,7 @@ caffe2.Graph = class {
                 index++;
             }
         }
-        for (const op of netDef.op) {
+        for (const op of net.op) {
             for (const name of op.output) {
                 if (tensors.has(name)) {
                     initializers.add(name);
@@ -285,7 +293,7 @@ caffe2.Graph = class {
         }
         let lastNode = null;
         let lastOutput = null;
-        for (const op of netDef.op) {
+        for (const op of net.op) {
             const node = new caffe2.Node(metadata, op, values);
             if (op.input.length === 1 &&
                 op.output.length >= 1 &&
@@ -304,15 +312,15 @@ caffe2.Graph = class {
             }
         }
         this.inputs = [];
-        for (const input of netDef.external_input) {
-            if (netDef.external_input.length > 1 && initializers.has(input)) {
+        for (const input of net.external_input) {
+            if (net.external_input.length > 1 && initializers.has(input)) {
                 continue;
             }
             const argument = new caffe2.Argument(input, [values.map(input)]);
             this.inputs.push(argument);
         }
         this.outputs = [];
-        for (const output of netDef.external_output) {
+        for (const output of net.external_output) {
             const argument = new caffe2.Argument(output, [values.map(output)]);
             this.outputs.push(argument);
         }
@@ -321,9 +329,11 @@ caffe2.Graph = class {
 
 caffe2.Argument = class {
 
-    constructor(name, value) {
+    constructor(name, value, type, visible) {
         this.name = name;
         this.value = value;
+        this.type = type || null;
+        this.visible = visible !== false;
     }
 };
 
@@ -345,10 +355,42 @@ caffe2.Node = class {
     constructor(metadata, op, values) {
         this.name = op.name || '';
         this.device = op.engine || '';
-        this.metadata = metadata;
         this.chain = [];
         this.type = metadata.type(op.type);
-        this.attributes = op.arg.map((arg) => new caffe2.Attribute(metadata, this.type.name, arg));
+        this.attributes = op.arg.map((arg) => {
+            const schema = metadata.attribute(op.type, arg.name);
+            const name = arg.name;
+            let value = null;
+            let type = null;
+            let visible = true;
+            if (arg.floats && arg.floats.length > 0) {
+                value = arg.floats;
+            } else if (arg.ints && arg.ints.length > 0) {
+                value = arg.ints;
+            } else if (arg.nets && arg.nets.length > 0) {
+                value = arg.nets.map((net) => new caffe2.Graph(metadata, net, null));
+                type = 'graph[]';
+            } else if (arg.n) {
+                value = new caffe2.Graph(metadata, arg.n, null);
+                type = 'graph';
+            } else {
+                value = arg.i;
+            }
+            if (schema) {
+                type = !type && schema.type ? schema.type : type;
+                if (type === 'boolean') {
+                    value = value !== 0 && value.toString() !== '0' ? true : false;
+                }
+                if (schema.visible === false) {
+                    visible = false;
+                } else if (schema.default !== undefined) {
+                    if (value === metadata.default || (value && value.toString() === schema.default.toString())) {
+                        visible = false;
+                    }
+                }
+            }
+            return new caffe2.Argument(name, value, type, visible);
+        });
         const inputs = op.input;
         const outputs = op.output;
         this.inputs = [];
@@ -388,47 +430,6 @@ caffe2.Node = class {
     }
 };
 
-caffe2.Attribute = class {
-
-    constructor(metadata, type, arg) {
-        this.name = arg.name;
-        if (arg.floats && arg.floats.length > 0) {
-            this.value = arg.floats;
-        } else if (arg.ints && arg.ints.length > 0) {
-            this.value = arg.ints;
-        } else if (arg.nets && arg.nets.length > 0) {
-            this.value = arg.nets.map((net) => new caffe2.Graph(metadata, net, null));
-            this.type = 'graph[]';
-        } else if (arg.n) {
-            this.value = new caffe2.Graph(metadata, arg.n, null);
-            this.type = 'graph';
-        } else if (arg.i !== 0) {
-            this.value = arg.i;
-        } else {
-            this.value = arg.i;
-        }
-        metadata = metadata.attribute(type, arg.name);
-        if (metadata) {
-            if (Object.prototype.hasOwnProperty.call(metadata, 'type')) {
-                this.type = metadata.type;
-                if (this.type === 'boolean') {
-                    this.value = this.value !== 0 && this.value.toString() !== '0' ? true : false;
-                }
-            }
-        }
-
-        if (metadata) {
-            if (metadata.visible === false) {
-                this.visible = false;
-            } else if (metadata.default !== undefined) {
-                if (this.value === metadata.default || (this.value && this.value.toString() === metadata.default.toString())) {
-                    this.visible = false;
-                }
-            }
-        }
-    }
-};
-
 caffe2.Tensor = class {
 
     constructor(name, tensor) {
@@ -442,7 +443,7 @@ caffe2.Tensor = class {
             this.quantization = {
                 type: 'linear',
                 scale: [tensor.Y_scale ? tensor.Y_scale.f : 0],
-                offset: [tensor.Y_zero_point && typeof tensor.Y_zero_point.i === 'bigint' ? Number(tensor.Y_zero_point.i) : 0]
+                offset: [tensor.Y_zero_point && typeof tensor.Y_zero_point.i === 'bigint' ? tensor.Y_zero_point.i.toNumber() : 0]
             };
         }
         if (tensor.values) {
@@ -472,11 +473,14 @@ caffe2.TensorType = class {
 caffe2.TensorShape = class {
 
     constructor(dimensions) {
-        this.dimensions = dimensions;
+        this.dimensions = Array.isArray(dimensions) ? dimensions.map((dim) => typeof dim === 'bigint' ? dim.toNumber() : dim) : dimensions;
     }
 
     toString() {
-        return this.dimensions ? (`[${this.dimensions.map((dimension) => dimension.toString()).join(',')}]`) : '';
+        if (Array.isArray(this.dimensions) && this.dimensions.length > 0) {
+            return `[${this.dimensions.map((dim) => dim.toString()).join(',')}]`;
+        }
+        return '';
     }
 };
 

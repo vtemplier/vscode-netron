@@ -5,15 +5,16 @@ const protobuf = {};
 
 protobuf.BinaryReader = class {
 
-    static open(data) {
+    static open(data, offset) {
+        offset = offset || 0;
         if (data instanceof Uint8Array) {
-            return new protobuf.BufferReader(data);
+            return new protobuf.BufferReader(data, offset);
         }
         if (data.length < 0x20000000) {
             data = data.peek();
-            return new protobuf.BufferReader(data);
+            return new protobuf.BufferReader(data, offset);
         }
-        return new protobuf.StreamReader(data);
+        return new protobuf.StreamReader(data, offset);
     }
 
     constructor() {
@@ -45,7 +46,7 @@ protobuf.BinaryReader = class {
                     }
                 }
             }
-        } catch (err) {
+        } catch {
             tags.clear();
         }
         this._position = 0;
@@ -96,15 +97,15 @@ protobuf.BinaryReader = class {
                                 }
                                 if (inner === 2) {
                                     tags[field] = inner;
-                                } else if (!type) {
-                                    tags[field] = inner;
-                                } else {
+                                } else if (type) {
                                     for (const [key, value] of Object.entries(inner)) {
                                         if (type[key] === 2 && value !== 2) {
                                             continue;
                                         }
                                         type[key] = value;
                                     }
+                                } else {
+                                    tags[field] = inner;
                                 }
                                 continue;
                             }
@@ -118,7 +119,7 @@ protobuf.BinaryReader = class {
                     if (this.position === end) {
                         return tags;
                     }
-                } catch (err) {
+                } catch {
                     // continue regardless of error
                 }
                 this.seek(end);
@@ -147,15 +148,15 @@ protobuf.BinaryReader = class {
                                 }
                                 if (inner === 2) {
                                     tags[field] = inner;
-                                } else if (!type) {
-                                    tags[field] = inner;
-                                } else {
+                                } else if (type) {
                                     for (const [name, value] of Object.entries(inner)) {
                                         if (type[name] === 2 && value !== 2) {
                                             continue;
                                         }
                                         type[name] = value;
                                     }
+                                } else {
+                                    tags[field] = inner;
                                 }
                                 continue;
                             }
@@ -168,7 +169,7 @@ protobuf.BinaryReader = class {
                     }
                 }
             }
-        } catch (err) {
+        } catch {
             tags = {};
         }
         this._position = 0;
@@ -202,8 +203,7 @@ protobuf.BinaryReader = class {
     }
 
     uint32() {
-        let c;
-        c = this.byte();
+        let c = this.byte();
         let value = (c & 127) >>> 0;
         if (c < 128) {
             return value;
@@ -224,7 +224,7 @@ protobuf.BinaryReader = class {
             return value;
         }
         c = this.byte();
-        value = value + ((c & 127) * 0x10000000);
+        value += (c & 127) * 0x10000000;
         if (c < 128) {
             return value;
         }
@@ -261,7 +261,7 @@ protobuf.BinaryReader = class {
                         }
                         if (this._position < this._length) {
                             c = this.byte();
-                            value = value + ((c & 127) * 0x10000000);
+                            value += (c & 127) * 0x10000000;
                             if (c < 128) {
                                 return value;
                             }
@@ -322,12 +322,12 @@ protobuf.BinaryReader = class {
                 this._unexpected();
             }
             const length = size >>> 2;
-            obj = size > 1048576 ? new Float32Array(length) : new Array(length);
+            obj = size > 0x100000 ? new Float32Array(length) : new Array(length);
             for (let i = 0; i < length; i++) {
                 obj[i] = this.float();
             }
             this._position = end;
-        } else if (obj !== undefined && obj.length < 1000000) {
+        } else if (obj !== undefined && obj.length <= 0x4000000) {
             obj.push(this.float());
         } else {
             obj = undefined;
@@ -349,7 +349,7 @@ protobuf.BinaryReader = class {
             const length = size >>> 3;
             obj = size > 1048576 ? new Float64Array(length) : new Array(length);
             for (let i = 0; i < length; i++) {
-                obj[i] = this.doubles();
+                obj[i] = this.double();
             }
             this._position = end;
         } else if (obj !== undefined && obj.length < 1000000) {
@@ -471,11 +471,11 @@ protobuf.BinaryReader = class {
 
 protobuf.BufferReader = class extends protobuf.BinaryReader {
 
-    constructor(buffer) {
+    constructor(buffer, offset) {
         super();
         this._buffer = buffer;
         this._length = buffer.length;
-        this._position = 0;
+        this._position = offset || 0;
         this._view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
     }
 
@@ -554,11 +554,11 @@ protobuf.BufferReader = class extends protobuf.BinaryReader {
 
 protobuf.StreamReader = class extends protobuf.BinaryReader {
 
-    constructor(stream) {
+    constructor(stream, offset) {
         super(new Uint8Array(0));
         this._stream = stream;
         this._length = stream.length;
-        this._position = 0;
+        this.seek(offset || 0);
     }
 
     skipVarint() {
@@ -667,7 +667,7 @@ protobuf.TextReader = class {
                 if (first && !whitespace) {
                     first = false;
                     if (c === '#') {
-                        let c;
+                        let c = '';
                         do {
                             c = decoder.decode();
                         }
@@ -717,7 +717,7 @@ protobuf.TextReader = class {
                     tags.set(tag, true);
                 }
             }
-        } catch (err) {
+        } catch {
             if (tags.has('[')) {
                 tags.clear();
             }
@@ -784,7 +784,7 @@ protobuf.TextReader = class {
     }
 
     double() {
-        let value;
+        let value = 0;
         let token = this._token;
         switch (token) {
             case 'nan': value = NaN; break;
@@ -899,7 +899,7 @@ protobuf.TextReader = class {
 
     enum(type) {
         const token = this._token;
-        let value;
+        let value = 0;
         if (Object.prototype.hasOwnProperty.call(type, token)) {
             value = type[token];
         } else {
@@ -982,8 +982,8 @@ protobuf.TextReader = class {
 
     entry(obj, key, value) {
         this.start();
-        let k;
-        let v;
+        let k = '';
+        let v = null;
         while (!this.end()) {
             const tag = this.tag();
             switch (tag) {
@@ -1220,11 +1220,11 @@ protobuf.TextReader = class {
                                     }
                                     c = c.charCodeAt(0);
                                     if (c >= 65 && c <= 70) {
-                                        c = c - 55;
+                                        c -= 55;
                                     } else if (c >= 97 && c <= 102) {
-                                        c = c - 87;
+                                        c -= 87;
                                     } else if (c >= 48 && c <= 57) {
-                                        c = c - 48;
+                                        c -= 48;
                                     } else {
                                         c = -1;
                                     }
@@ -1333,7 +1333,7 @@ protobuf.TextReader = class {
         let line = 1;
         let column = 1;
         this._decoder.position = 0;
-        let c;
+        let c = '';
         do {
             if (this._decoder.position === this._position) {
                 return `at ${line}:${column}.`;

@@ -5,33 +5,30 @@ const safetensors = {};
 
 safetensors.ModelFactory = class {
 
-    match(context) {
+    async match(context) {
         const container = safetensors.Container.open(context);
         if (container) {
-            context.type = 'safetensors';
-            context.target = container;
-            return;
+            return context.set('safetensors', container);
         }
-        const obj = context.peek('json');
+        const obj = await context.peek('json');
         if (obj && obj.weight_map) {
             const entries = Object.entries(obj.weight_map);
             if (entries.length > 0 && entries.every(([, value]) => typeof value === 'string' && value.endsWith('.safetensors'))) {
-                context.type = 'safetensors.json';
-                context.target = entries;
-                return;
+                return context.set('safetensors.json', entries);
             }
         }
+        return null;
     }
 
     async open(context) {
         switch (context.type) {
             case 'safetensors': {
-                const container = context.target;
+                const container = context.value;
                 await container.read();
                 return new safetensors.Model(container.entries);
             }
             case 'safetensors.json': {
-                const weight_map = new Map(context.target);
+                const weight_map = new Map(context.value);
                 const keys = new Set(weight_map.keys());
                 const files = Array.from(new Set(weight_map.values()));
                 const contexts = await Promise.all(files.map((name) => context.fetch(name)));
@@ -100,11 +97,8 @@ safetensors.Value = class {
 
     constructor(name, value) {
         this.name = name;
+        this.type = value.type;
         this.initializer = value;
-    }
-
-    get type() {
-        return this.initializer.type;
     }
 };
 

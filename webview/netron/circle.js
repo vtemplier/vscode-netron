@@ -7,19 +7,16 @@ const circle = {};
 
 circle.ModelFactory = class {
 
-    match(context) {
-        const reader = context.peek('flatbuffers.binary');
+    async match(context) {
+        const reader = await context.peek('flatbuffers.binary');
         if (reader && reader.identifier === 'CIR0') {
-            context.type = 'circle.flatbuffers';
-            context.target = reader;
-            return;
+            return context.set('circle.flatbuffers', reader);
         }
-        const obj = context.peek('json');
+        const obj = await context.peek('json');
         if (obj && obj.subgraphs && obj.operator_codes) {
-            context.type = 'circle.flatbuffers.json';
-            context.target = obj;
-            return;
+            return context.set('circle.flatbuffers.json', obj);
         }
+        return null;
     }
 
     async open(context) {
@@ -30,7 +27,7 @@ circle.ModelFactory = class {
         switch (context.type) {
             case 'circle.flatbuffers.json': {
                 try {
-                    const reader = context.read('flatbuffers.text');
+                    const reader = await context.read('flatbuffers.text');
                     model = circle.schema.Model.createText(reader);
                 } catch (error) {
                     const message = error && error.message ? error.message : error.toString();
@@ -40,7 +37,7 @@ circle.ModelFactory = class {
             }
             case 'circle.flatbuffers': {
                 try {
-                    const reader = context.target;
+                    const reader = context.value;
                     model = circle.schema.Model.create(reader);
                 } catch (error) {
                     const message = error && error.message ? error.message : error.toString();
@@ -54,7 +51,7 @@ circle.ModelFactory = class {
                             attachments.set(name, value);
                         }
                     }
-                } catch (error) {
+                } catch {
                     // continue regardless of error
                 }
                 break;
@@ -102,15 +99,26 @@ circle.Model = class {
         let modelMetadata = null;
         for (const metadata of model.metadata) {
             const buffer = model.buffers[metadata.buffer];
+            let data = null;
+            const position = stream.position;
             if (buffer && buffer.data && buffer.data.length > 0) {
+                data = buffer.data;
+            } else if (buffer && buffer.offset !== 0n && buffer.size !== 0n) {
+                const offset = buffer.offset.toNumber();
+                const size = buffer.size.toNumber();
+                stream.seek(offset);
+                data = stream.read(size);
+            }
+            stream.seek(position);
+            if (data) {
                 switch (metadata.name) {
                     case 'min_runtime_version': {
-                        const decoder = new TextDecoder();
-                        this.runtime = decoder.decode(buffer.data);
+                        const decoder = new TextDecoder('utf-8');
+                        this.runtime = decoder.decode(data);
                         break;
                     }
                     case 'TFLITE_METADATA': {
-                        const reader = flatbuffers.BinaryReader.open(buffer.data);
+                        const reader = flatbuffers.BinaryReader.open(data);
                         if (!reader || !circle.schema.ModelMetadata.identifier(reader)) {
                             throw new circle.Error('Invalid TensorFlow Lite metadata.');
                         }
@@ -122,7 +130,7 @@ circle.Model = class {
                             this.version = modelMetadata.version;
                         }
                         if (modelMetadata.description) {
-                            this.description = this._description ? [this._description, modelMetadata.description].join(' ') : modelMetadata.description;
+                            this.description = this.description ? [this.description, modelMetadata.description].join(' ') : modelMetadata.description;
                         }
                         if (modelMetadata.author) {
                             this.metadata.push(new circle.Argument('author', modelMetadata.author));
@@ -133,6 +141,9 @@ circle.Model = class {
                         break;
                     }
                     default: {
+                        const value = data.length < 256 && data.every((c) => c >= 32 && c < 128) ? String.fromCharCode.apply(null, data) : '?';
+                        const argument = new circle.Argument(metadata.name, value);
+                        this.metadata.push(argument);
                         break;
                     }
                 }
@@ -260,24 +271,23 @@ circle.Signature = class {
 
 circle.Node = class {
 
-    constructor(metadata, node, type, location, tensors) {
-        this._location = location;
-        this._type = type.custom ? { name: type.name } : metadata.type(type.name);
-        this._inputs = [];
-        this._outputs = [];
-        this._attributes = [];
+    constructor(metadata, node, type, identifier, tensors) {
+        this.name = '';
+        this.identifier = identifier;
+        this.type = type.custom ? { name: type.name } : metadata.type(type.name);
+        this.inputs = [];
+        this.outputs = [];
+        this.attributes = [];
         if (node) {
-            let inputs = [];
-            let outputs = [];
-            inputs = Array.from(node.inputs || new Int32Array(0));
-            outputs = Array.from(node.outputs || new Int32Array(0));
+            const attributes = [];
+            const inputs = Array.from(node.inputs || new Int32Array(0));
             for (let i = 0; i < inputs.length;) {
                 let count = 1;
                 let name = null;
                 let visible = true;
                 const values = [];
-                if (this._type && this._type.inputs && i < this._type.inputs.length) {
-                    const input = this._type.inputs[i];
+                if (this.type && this.type.inputs && i < this.type.inputs.length) {
+                    const input = this.type.inputs[i];
                     name = input.name;
                     if (input.list) {
                         count = inputs.length - i;
@@ -294,24 +304,25 @@ circle.Node = class {
                 }
                 name = name ? name : (i + 1).toString();
                 i += count;
-                const argument = new circle.Argument(name, values, visible);
-                this._inputs.push(argument);
+                const argument = new circle.Argument(name, values, null, visible);
+                this.inputs.push(argument);
             }
+            const outputs = Array.from(node.outputs || new Int32Array(0));
             for (let i = 0; i < outputs.length; i++) {
                 const index = outputs[i];
                 const value = tensors.map(index);
                 const values = value ? [value] : [];
                 let name = (i + 1).toString();
-                if (this._type && this._type.outputs && i < this._type.outputs.length) {
-                    const output = this._type.outputs[i];
+                if (this.type && this.type.outputs && i < this.type.outputs.length) {
+                    const output = this.type.outputs[i];
                     if (output && output.name) {
                         name = output.name;
                     }
                 }
                 const argument = new circle.Argument(name, values);
-                this._outputs.push(argument);
+                this.outputs.push(argument);
             }
-            if (type.custom && Array.isArray(node.custom_options) && node.custom_options.length > 0) {
+            if (type.custom && node.custom_options && node.custom_options.length > 0) {
                 let decoded = false;
                 if (node.custom_options_format === circle.schema.CustomOptionsFormat.FLEXBUFFERS) {
                     try {
@@ -319,26 +330,23 @@ circle.Node = class {
                         if (reader) {
                             const custom_options = reader.read();
                             if (Array.isArray(custom_options)) {
-                                const attribute = new circle.Attribute(null, 'custom_options', custom_options);
-                                this._attributes.push(attribute);
+                                attributes.push([null, 'custom_options', custom_options]);
                                 decoded = true;
                             } else if (custom_options) {
                                 for (const [key, value] of Object.entries(custom_options)) {
                                     const schema = metadata.attribute(type.name, key);
-                                    const attribute = new circle.Attribute(schema, key, value);
-                                    this._attributes.push(attribute);
+                                    attributes.push([schema, key, value]);
                                 }
                                 decoded = true;
                             }
                         }
-                    } catch (err) {
+                    } catch {
                         // continue regardless of error
                     }
                 }
                 if (!decoded) {
                     const schema = metadata.attribute(type.name, 'custom');
-                    const attribute = new circle.Attribute(schema, 'custom', Array.from(node.custom_options));
-                    this._attributes.push(attribute);
+                    attributes.push([schema, 'custom', Array.from(node.custom_options)]);
                 }
             }
             const options = node.builtin_options;
@@ -346,100 +354,52 @@ circle.Node = class {
                 for (const [name, value] of Object.entries(options)) {
                     if (name === 'fused_activation_function' && value) {
                         if (value < 1 || value > 5) {
-                            throw new circle.Error(`Unsupported activation funtion index '${value}'.`);
+                            throw new circle.Error(`Unsupported activation function index '${value}'.`);
                         }
                         const list = ['Unknown', 'Relu', 'ReluN1To1', 'Relu6', 'Tanh', 'SignBit'];
                         const type = list[value];
                         const node = new circle.Node(metadata, null, { name: type }, null, []);
-                        this._chain = [node];
+                        this.chain = [node];
                     }
                     const schema = metadata.attribute(type.name, name);
-                    const attribute = new circle.Attribute(schema, name, value);
-                    this._attributes.push(attribute);
+                    attributes.push([schema, name, value]);
                 }
             }
-        }
-    }
-
-    get type() {
-        return this._type;
-    }
-
-    get name() {
-        return '';
-    }
-
-    get location() {
-        return this._location;
-    }
-
-    get inputs() {
-        return this._inputs;
-    }
-
-    get outputs() {
-        return this._outputs;
-    }
-
-    get chain() {
-        return this._chain;
-    }
-
-    get attributes() {
-        return this._attributes;
-    }
-};
-
-circle.Attribute = class {
-
-    constructor(metadata, name, value) {
-        this._name = name;
-        this._value = ArrayBuffer.isView(value) ? Array.from(value) : value;
-        this._type = metadata && metadata.type ? metadata.type : null;
-        if (this._name === 'fused_activation_function') {
-            this._visible = false;
-        }
-        if (this._type) {
-            this._value = circle.Utility.enum(this._type, this._value);
-        }
-        if (metadata) {
-            if (metadata.visible === false) {
-                this._visible = false;
-            } else if (metadata.default !== undefined) {
-                value = this._value;
-                if (typeof value === 'function') {
-                    value = value();
+            this.attributes = attributes.map(([metadata, name, value]) => {
+                const type = metadata && metadata.type ? metadata.type : null;
+                value = ArrayBuffer.isView(value) ? Array.from(value) : value;
+                let visible = true;
+                if (name === 'fused_activation_function') {
+                    visible = false;
                 }
-                if (value === metadata.default) {
-                    this._visible = false;
+                if (type) {
+                    value = circle.Utility.enum(type, value);
                 }
-            }
+                if (metadata) {
+                    if (metadata.visible === false) {
+                        visible = false;
+                    } else if (metadata.default !== undefined) {
+                        if (typeof value === 'function') {
+                            value = value();
+                        }
+                        if (value === metadata.default) {
+                            visible = false;
+                        }
+                    }
+                }
+                return new circle.Argument(name, value, type, visible);
+            });
         }
-    }
-
-    get name() {
-        return this._name;
-    }
-
-    get type() {
-        return this._type;
-    }
-
-    get value() {
-        return this._value;
-    }
-
-    get visible() {
-        return this._visible === false ? false : true;
     }
 };
 
 circle.Argument = class {
 
-    constructor(name, value, visible) {
+    constructor(name, value, type, visible) {
         this.name = name;
         this.value = value;
-        this.visible = visible === false ? false : true;
+        this.type = type || null;
+        this.visible = visible !== false;
     }
 };
 
@@ -448,7 +408,7 @@ circle.Value = class {
     constructor(index, tensor, initializer, description, denotation) {
         const name = tensor.name || '';
         this.name = `${name}\n${index}`;
-        this.location = index.toString();
+        this.identifier = index.toString();
         this.type = tensor.type !== undefined && tensor.shape !== undefined ? new circle.TensorType(tensor, denotation) : null;
         this.initializer = initializer;
         this.description = description;
@@ -469,7 +429,7 @@ circle.Value = class {
 circle.Tensor = class {
 
     constructor(index, tensor, buffer, stream, is_variable) {
-        this.location = index.toString();
+        this.identifier = index.toString();
         this.name = tensor.name;
         this.type = new circle.TensorType(tensor);
         this.category = is_variable ? 'Variable' : '';
@@ -523,8 +483,9 @@ circle.Tensor = class {
 circle.TensorType = class {
 
     constructor(tensor, denotation) {
+        const shape = tensor.shape_signature && tensor.shape_signature.length > 0 ? tensor.shape_signature : tensor.shape;
         this.dataType = circle.Utility.dataType(tensor.type);
-        this.shape = new circle.TensorShape(Array.from(tensor.shape || []));
+        this.shape = new circle.TensorShape(Array.from(shape || []));
         this.denotation = denotation;
     }
 

@@ -3,20 +3,19 @@ const cntk = {};
 
 cntk.ModelFactory = class {
 
-    match(context) {
+    async match(context) {
         const stream = context.stream;
         // CNTK v1
         const signature = [0x42, 0x00, 0x43, 0x00, 0x4e, 0x00, 0x00, 0x00];
         if (stream && signature.length <= stream.length && stream.peek(signature.length).every((value, index) => value === signature[index])) {
-            context.type = 'cntk.v1';
-            return;
+            return context.set('cntk.v1');
         }
         // CNTK v2
-        const tags = context.tags('pb');
+        const tags = await context.tags('pb');
         if (tags.get(1) === 0 && tags.get(2) === 2) {
-            context.type = 'cntk.v2';
-            return;
+            return context.set('cntk.v2');
         }
+        return null;
     }
 
     async open(context) {
@@ -25,7 +24,7 @@ cntk.ModelFactory = class {
             case 'cntk.v1': {
                 let obj = null;
                 try {
-                    const reader = context.read('binary');
+                    const reader = await context.read('binary');
                     obj = new cntk.ComputationNetwork(reader);
                 } catch (error) {
                     const message = error && error.message ? error.message : error.toString();
@@ -39,7 +38,7 @@ cntk.ModelFactory = class {
                 cntk.proto.PoolingType = { 0: 'Max', 1: 'Average' };
                 let obj = null;
                 try {
-                    const reader = context.read('protobuf.binary');
+                    const reader = await context.read('protobuf.binary');
                     const dictionary = cntk.proto.Dictionary.decode(reader);
                     obj = cntk.ModelFactory._convertDictionary(dictionary);
                 } catch (error) {
@@ -130,7 +129,7 @@ cntk.Graph = class {
             if (!values.has(name)) {
                 switch (version) {
                     case 1:
-                        values.set(name, new cntk.Value(version, obj ? obj : { name: name }));
+                        values.set(name, new cntk.Value(version, obj ? obj : { name }));
                         break;
                     case 2:
                         values.set(name, new cntk.Value(version, obj ? obj : { uid: name }));
@@ -178,13 +177,13 @@ cntk.Graph = class {
                 for (const input of obj.inputs) {
                     const value = values.map(input.uid, version, input);
                     // VariableKind { 0: 'input', 1: 'output', 2: 'parameter', 3: 'constant', 4: 'placeholder' }
-                    if (input.kind === 0) {
+                    if (input.kind === 0n) {
                         const inputName = input.name || input.uid;
                         this.inputs.push(new cntk.Argument(inputName, [value]));
                     }
                 }
                 for (const block of obj.primitive_functions) {
-                    if (block.op === 57 && block.block_function_composite) {
+                    if (block.op === 57n && block.block_function_composite) {
                         const list = [block.block_function_composite.root];
                         const output = map.get(block.block_function_composite.root);
                         const keys = block.block_function_composite_arguments_map_keys;
@@ -231,9 +230,11 @@ cntk.Graph = class {
 
 cntk.Argument = class {
 
-    constructor(name, value) {
+    constructor(name, value, type, visible) {
         this.name = name;
         this.value = value;
+        this.type = type || null;
+        this.visible = visible !== false;
     }
 };
 
@@ -263,8 +264,8 @@ cntk.Value = class {
             case 2:
                 if (obj.value) {
                     this.name = obj.name || obj.uid;
-                    this.type = null;
                     this.initializer = new cntk.Tensor(version, obj);
+                    this.type = this.initializer.type;
                 } else {
                     this.name = obj.uid;
                     if (obj.data_type && obj.shape) {
@@ -287,15 +288,17 @@ cntk.Node = class {
         this.outputs = [];
         let inputs = [];
         let outputs = [];
+        const attributes = [];
         switch (version) {
             case 1: {
                 const type = obj.__type__;
-                this.type = metadata.type(type) || { name: type };
+                this.type = { name: type, ...metadata.type(type) };
+                delete this.type.identifier;
                 this.name = obj.name;
                 for (const [name, value] of Object.entries(obj)) {
                     if (name !== '__type__' && name !== 'name' && name !== 'inputs' && name !== 'precision') {
-                        const attribute = new cntk.Attribute(metadata.attribute(type, name), name, value);
-                        this.attributes.push(attribute);
+                        const schema = metadata.attribute(type, name);
+                        attributes.push([schema, name, value]);
                     }
                 }
                 inputs = obj.inputs.map((input) => values.map(input, version));
@@ -305,26 +308,29 @@ cntk.Node = class {
             case 2: {
                 this.name = obj.name || obj.uid || null;
                 const output = obj.uid;
-                if (obj.op === 57) {
-                    this.type = metadata.type(obj.uid) || { name: obj.uid };
+                if (obj.op === 57n) {
+                    this.type = { name: obj.uid, ...metadata.type(obj.uid) };
+                    delete this.type.identifier;
                 } else if (Object.prototype.hasOwnProperty.call(obj, 'op')) {
                     // cntk/Source/CNTKv2LibraryDll/API/Internals/PrimitiveOpType.h
-                    const op = Number(obj.op);
-                    this.type = metadata.type(op);
+                    const op = obj.op.toNumber();
+                    this.type = { ...metadata.type(op) };
+                    delete this.type.identifier;
                 } else {
                     const type = obj.type;
-                    this.type = metadata.type(type) || { name: type };
+                    this.type = { name: type, ...metadata.type(type) };
+                    delete this.type.identifier;
                     if (obj.user_defined_state) {
                         for (const [name, value] of Object.entries(obj.user_defined_state)) {
-                            const attribute = new cntk.Attribute(metadata.attribute(type, name), name, value);
-                            this.attributes.push(attribute);
+                            const schema = metadata.attribute(type, name);
+                            attributes.push([schema, name, value]);
                         }
                     }
                 }
                 if (obj.attributes) {
                     for (const [name, value] of Object.entries(obj.attributes)) {
-                        const attribute = new cntk.Attribute(metadata.attribute(this.type, name), name, value);
-                        this.attributes.push(attribute);
+                        const schema = metadata.attribute(this.type, name);
+                        attributes.push([schema, name, value]);
                     }
                 }
                 inputs = obj.inputs.map((input) => values.map(input, version));
@@ -337,96 +343,93 @@ cntk.Node = class {
         }
         let inputIndex = 0;
         if (this.type && this.type.inputs) {
-            for (const inputSchema of this.type.inputs) {
-                if (inputIndex < inputs.length || inputSchema.option !== 'optional') {
-                    const inputCount = inputSchema.type === 'Tensor[]' ? (inputs.length - inputIndex) : 1;
-                    const inputArguments = [];
-                    for (const inputArgument of inputs.slice(inputIndex, inputIndex + inputCount)) {
-                        if (inputArgument.name !== '' || inputSchema.option !== 'optional') {
-                            inputArguments.push(inputArgument);
+            for (const schema of this.type.inputs) {
+                if (inputIndex < inputs.length || schema.option !== 'optional') {
+                    const count = schema.type === 'Tensor[]' ? (inputs.length - inputIndex) : 1;
+                    const values = [];
+                    for (const value of inputs.slice(inputIndex, inputIndex + count)) {
+                        if (value.name !== '' || schema.option !== 'optional') {
+                            values.push(value);
                         }
                     }
-                    this.inputs.push(new cntk.Argument(inputSchema.name, inputArguments));
-                    inputIndex += inputCount;
+                    const argument = new cntk.Argument(schema.name, values);
+                    this.inputs.push(argument);
+                    inputIndex += count;
                 }
             }
         }
         this.inputs.push(...inputs.slice(inputIndex).map((argument, index) => {
             return new cntk.Argument((inputIndex + index).toString(), [argument]);
         }));
-
         let outputIndex = 0;
         if (this.type && this.type.outputs) {
-            for (const outputSchema of this.type.outputs) {
-                if (outputIndex < outputs.length || !outputSchema.optional) {
-                    const outputCount = outputSchema.type === 'Tensor[]' ? (outputs.length - outputIndex) : 1;
-                    this.outputs.push(new cntk.Argument(outputSchema.name, outputs.slice(outputIndex, outputIndex + outputCount)));
-                    outputIndex += outputCount;
+            for (const schema of this.type.outputs) {
+                if (outputIndex < outputs.length || !schema.optional) {
+                    const count = schema.type === 'Tensor[]' ? (outputs.length - outputIndex) : 1;
+                    const values = outputs.slice(outputIndex, outputIndex + count);
+                    const argument = new cntk.Argument(schema.name, values);
+                    this.outputs.push(argument);
+                    outputIndex += count;
                 }
             }
         }
         this.outputs.push(...outputs.slice(outputIndex).map((argument) => {
             return new cntk.Argument(outputIndex.toString(), [argument]);
         }));
-    }
-};
-
-cntk.Attribute = class {
-
-    constructor(metadata, name, value) {
-        this.name = name;
-        this.value = value;
-        this.type = null;
-        if (this.value && this.value.__type__ === 'shape') {
-            this.value = new cntk.TensorShape(1, value);
-            this.type = 'shape';
-        }
-        if (cntk.proto && this.value instanceof cntk.proto.NDShape) {
-            this.value = new cntk.TensorShape(2, value);
-            this.type = 'shape';
-        }
-        if (cntk.proto && this.value instanceof cntk.proto.Axis) {
-            const axis = { __type__: 'Axis' };
-            for (const key of Object.keys(value).filter((key) => key !== 'name')) {
-                axis[key] = value[key];
+        this.attributes = attributes.map(([metadata, name, value]) => {
+            let type = null;
+            let visible = true;
+            if (value && value.__type__ === 'shape') {
+                value = new cntk.TensorShape(1, value);
+                type = 'shape';
             }
-            this.value = axis;
-        }
-        if (metadata) {
-            if (metadata.type) {
-                this.type = metadata.type;
-                const type = cntk[this.type] || cntk.proto[this.type];
-                if (type && type[this.value]) {
-                    this.value = type[this.value];
-                }
+            if (cntk.proto && value instanceof cntk.proto.NDShape) {
+                value = new cntk.TensorShape(2, value);
+                type = 'shape';
             }
-            if (metadata.visible === false) {
-                this.visible = false;
-            } else if (Object.prototype.hasOwnProperty.call(metadata, 'default')) {
-                let defaultValue = metadata.default;
-                value = this.value;
-                if (typeof value === 'function') {
-                    value = value();
+            if (cntk.proto && value instanceof cntk.proto.Axis) {
+                const axis = { __type__: 'Axis' };
+                for (const key of Object.keys(value).filter((key) => key !== 'name')) {
+                    axis[key] = value[key];
                 }
-                if (this.type === 'shape') {
-                    value = value.dimensions;
+                value = axis;
+            }
+            if (metadata) {
+                if (metadata.type) {
+                    type = metadata.type;
+                    const table = cntk[type] || cntk.proto[type];
+                    if (table && table[value]) {
+                        value = table[value];
+                    }
                 }
-                if (value === defaultValue) {
-                    this.visible = false;
-                } else if (Array.isArray(value) && Array.isArray(defaultValue)) {
-                    defaultValue = defaultValue.slice(0, defaultValue.length);
-                    if (defaultValue.length > 1 && defaultValue[defaultValue.length - 1] === null) {
-                        defaultValue.pop();
-                        while (defaultValue.length < value.length) {
-                            defaultValue.push(defaultValue[defaultValue.length - 1]);
+                if (metadata.visible === false) {
+                    visible = false;
+                } else if (metadata.default !== undefined) {
+                    let defaultValue = metadata.default;
+                    if (typeof value === 'function') {
+                        value = value();
+                    }
+                    if (type === 'shape') {
+                        value = value.dimensions;
+                    }
+                    if (value === defaultValue) {
+                        visible = false;
+                    } else if (Array.isArray(value) && Array.isArray(defaultValue)) {
+                        defaultValue = defaultValue.slice(0, defaultValue.length);
+                        if (defaultValue.length > 1 && defaultValue[defaultValue.length - 1] === null) {
+                            defaultValue.pop();
+                            while (defaultValue.length < value.length) {
+                                defaultValue.push(defaultValue[defaultValue.length - 1]);
+                            }
+                        }
+                        if (value.every((item, index) => item === defaultValue[index])) {
+                            visible = false;
                         }
                     }
-                    if (value.every((item, index) => item === defaultValue[index])) {
-                        this.visible = false;
-                    }
                 }
             }
-        }
+            return new cntk.Argument(name, value, type, visible);
+        });
     }
 };
 
@@ -498,7 +501,7 @@ cntk.TensorShape = class {
                 this.dimensions = shape.dims;
                 break;
             case 2:
-                this.dimensions = shape.shape_dim.map((dimension) => Number(dimension));
+                this.dimensions = shape.shape_dim.map((dimension) => dimension.toNumber());
                 break;
             default:
                 throw new cntk.Error(`Unsupported CNTK version '${version}'.`);
@@ -597,7 +600,7 @@ cntk.ComputationNetwork = class {
     constructor(reader) {
         reader = new cntk.BinaryReader(reader);
         const shape = (dims) => {
-            return { __type__: 'shape', dims: dims };
+            return { __type__: 'shape', dims };
         };
         reader.assert('BCN');
         reader.assert('BVersion');
@@ -754,10 +757,10 @@ cntk.ComputationNetwork = class {
                 this.blendTimeConstant = reader.float64();
                 this.imageLayoutKind = reader.int32();
                 if (version >= 13) {
-                    if (version !== 19) {
-                        this.runCountUntied = reader.uint64().toNumber();
+                    if (version === 19) {
+                        this.runCountUntied = reader.boolean() ? 0 : 'SIZE_MAX';
                     } else {
-                        this.runCountUntied = reader.boolean() ? 0 : 'SIZE_MAX'; // TODO
+                        this.runCountUntied = reader.uint64().toNumber();
                     }
                 } else {
                     mbCount = reader.uint64().toNumber();
@@ -907,7 +910,7 @@ cntk.ComputationNetwork = class {
                     __type__: 'LearnableParameter',
                     name: `${nodeName}.run_sample_count`,
                     precision: node.precision,
-                    sampleLayout: shape([1]), // TODO set value = 0
+                    sampleLayout: shape([1]),
                     learningRateMultiplier: 0
                 };
                 nodes.push(runSampleCount);
@@ -1106,7 +1109,7 @@ cntk.BinaryReader = class {
             dims.push(rank);
             dims.push(dim);
         }
-        return { __type__: 'shape', dims: dims };
+        return { __type__: 'shape', dims };
     }
 };
 

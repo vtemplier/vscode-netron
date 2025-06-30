@@ -5,19 +5,20 @@ const flux = {};
 
 flux.ModelFactory = class {
 
-    match(context) {
+    async match(context) {
         const identifier = context.identifier;
-        const extension = identifier.split('.').pop().toLowerCase();
+        const extension = identifier.lastIndexOf('.') > 0 ? identifier.split('.').pop().toLowerCase() : '';
         const stream = context.stream;
         if (stream && extension === 'bson') {
-            context.type = 'flux.bson';
+            return context.set('flux.bson');
         }
+        return null;
     }
 
     async open(context) {
         let root = null;
         try {
-            root = context.read('bson');
+            root = await context.read('bson');
         } catch (error) {
             const message = error && error.message ? error.message : error.toString();
             throw new flux.Error(`File format is not Flux BSON (${message.replace(/\.$/, '')}).`);
@@ -55,16 +56,8 @@ flux.ModelFactory = class {
 flux.Model = class {
 
     constructor(/* root */) {
-        this._format = 'Flux';
-        this._graphs = [];
-    }
-
-    get format() {
-        return this._format;
-    }
-
-    get graphs() {
-        return this._graphs;
+        this.format = 'Flux';
+        this.graphs = [];
     }
 };
 

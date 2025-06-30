@@ -1,7 +1,7 @@
 
 const base = {};
 
-base.Complex64 = class Complex {
+base.Complex64 = class Complex64 {
 
     constructor(real, imaginary) {
         this.real = real;
@@ -9,11 +9,13 @@ base.Complex64 = class Complex {
     }
 
     toString(/* radix */) {
-        return `${this.real} + ${this.imaginary}i`;
+        const sign = this.imaginary < 0 ? '-' : '+';
+        const imaginary = Math.abs(this.imaginary);
+        return `${this.real} ${sign} ${imaginary}i`;
     }
 };
 
-base.Complex128 = class Complex {
+base.Complex128 = class Complex128 {
 
     constructor(real, imaginary) {
         this.real = real;
@@ -21,9 +23,13 @@ base.Complex128 = class Complex {
     }
 
     toString(/* radix */) {
-        return `${this.real} + ${this.imaginary}i`;
+        const sign = this.imaginary < 0 ? '-' : '+';
+        const imaginary = Math.abs(this.imaginary);
+        return `${this.real} ${sign} ${imaginary}i`;
     }
 };
+
+/* eslint-disable no-extend-native */
 
 BigInt.prototype.toNumber = function() {
     if (this > Number.MAX_SAFE_INTEGER || this < Number.MIN_SAFE_INTEGER) {
@@ -47,8 +53,8 @@ if (!DataView.prototype.getFloat16) {
         return value & 0x8000 ? -f : f;
     };
     DataView.__float16_pow = {
-        1: 1/16384, 2: 1/8192, 3: 1/4096, 4: 1/2048, 5: 1/1024, 6: 1/512, 7: 1/256, 8: 1/128,
-        9: 1/64, 10: 1/32, 11: 1/16, 12: 1/8, 13: 1/4, 14: 1/2, 15: 1, 16: 2,
+        1: 1 / 16384, 2: 1 / 8192, 3: 1 / 4096, 4: 1 / 2048, 5: 1 / 1024, 6: 1 / 512, 7: 1 / 256, 8: 1 / 128,
+        9: 1 / 64, 10: 1 / 32, 11: 1 / 16, 12: 1 / 8, 13: 1 / 4, 14: 1 / 2, 15: 1, 16: 2,
         17: 4, 18: 8, 19: 16, 20: 32, 21: 64, 22: 128, 23: 256, 24: 512,
         25: 1024, 26: 2048, 27: 4096, 28: 8192, 29: 16384, 30: 32768, 31: 65536
     };
@@ -104,6 +110,13 @@ if (!DataView.prototype.getBfloat16) {
     DataView.__bfloat16_get_uint16_be = new Uint16Array(DataView.__bfloat16_get_float32_be.buffer, DataView.__bfloat16_get_float32_be.byteOffset, 2);
 }
 
+DataView.__float4e2m1_float32 = new Float32Array([0, 0.5, 1, 1.5, 2, 3, 4, 6, -0, -0.5, -1, -1.5, -2, -3, -4, -6]);
+DataView.prototype.getFloat4e2m1 = function(byteOffset) {
+    let value = this.getUint8(byteOffset >> 1);
+    value = byteOffset & 1 ? value >> 4 : value & 0x0F;
+    return DataView.__float4e2m1_float32[value];
+};
+
 DataView.__float8e4m3_float32 = new Float32Array(1);
 DataView.__float8e4m3_uint32 = new Uint32Array(DataView.__float8e4m3_float32.buffer, DataView.__float8e4m3_float32.byteOffset, 1);
 DataView.prototype.getFloat8e4m3 = function(byteOffset, fn, uz) {
@@ -126,12 +139,12 @@ DataView.prototype.getFloat8e4m3 = function(byteOffset, fn, uz) {
     if (expo === 0) {
         if (mant > 0) {
             expo = 0x7F - exponent_bias;
-            if (mant & 0x4 === 0) {
+            if ((mant & 0x4) === 0) {
                 mant &= 0x3;
                 mant <<= 1;
                 expo -= 1;
             }
-            if (mant & 0x4 === 0) {
+            if ((mant & 0x4) === 0) {
                 mant &= 0x3;
                 mant <<= 1;
                 expo -= 1;
@@ -179,7 +192,7 @@ DataView.prototype.getFloat8e5m2 = function(byteOffset, fn, uz) {
     if (expo === 0) {
         if (mant > 0) {
             expo = 0x7F - exponent_bias;
-            if (mant & 0x2 === 0) {
+            if ((mant & 0x2) === 0) {
                 mant &= 0x1;
                 mant <<= 1;
                 expo -= 1;
@@ -197,14 +210,14 @@ DataView.prototype.getFloat8e5m2 = function(byteOffset, fn, uz) {
 };
 
 DataView.prototype.getIntBits = DataView.prototype.getUintBits || function(offset, bits, littleEndian) {
-    offset = offset * bits;
+    offset *= bits;
     const position = Math.floor(offset / 8);
     const remainder = offset % 8;
-    let value;
+    let value = 0;
     if ((remainder + bits) <= 8) {
-        value = littleEndian ? this.getUint8(position) >> remainder /* TODO */ : this.getUint8(position) >> (8 - remainder - bits);
+        value = littleEndian ? this.getUint8(position) >> remainder : this.getUint8(position) >> (8 - remainder - bits);
     } else {
-        value = littleEndian ? this.getUint16(position, true) >> remainder /* TODO */ : this.getUint16(position, false) >> (16 - remainder - bits);
+        value = littleEndian ? this.getUint16(position, true) >> remainder : this.getUint16(position, false) >> (16 - remainder - bits);
     }
     value &= (1 << bits) - 1;
     if (value & (1 << (bits - 1))) {
@@ -214,14 +227,14 @@ DataView.prototype.getIntBits = DataView.prototype.getUintBits || function(offse
 };
 
 DataView.prototype.getUintBits = DataView.prototype.getUintBits || function(offset, bits, littleEndian) {
-    offset = offset * bits;
+    offset *= bits;
     const position = Math.floor(offset / 8);
     const remainder = offset % 8;
-    let value;
+    let value = 0;
     if ((remainder + bits) <= 8) {
-        value = littleEndian ? this.getUint8(position) >> remainder /* TODO */ : this.getUint8(position) >> (8 - remainder - bits);
+        value = littleEndian ? this.getUint8(position) >> remainder : this.getUint8(position) >> (8 - remainder - bits);
     } else {
-        value = littleEndian ? this.getUint16(position, true) >> remainder /* TODO */ : this.getUint16(position, false) >> (16 - remainder - bits);
+        value = littleEndian ? this.getUint16(position, true) >> remainder : this.getUint16(position, false) >> (16 - remainder - bits);
     }
     return value & ((1 << bits) - 1);
 };
@@ -257,6 +270,17 @@ DataView.prototype.setComplex128 = DataView.prototype.setComplex128 || function(
         this.setFloat64(byteOffset, value.imaginary, littleEndian);
     }
 };
+
+if (typeof Element !== 'undefined' && Element.prototype && !Element.prototype.replaceChildren) {
+    Element.prototype.replaceChildren = function(...args) {
+        while (this.lastChild) {
+            this.removeChild(this.lastChild);
+        }
+        this.append(...args);
+    };
+}
+
+/* eslint-enable no-extend-native */
 
 base.BinaryStream = class {
 
@@ -298,7 +322,7 @@ base.BinaryStream = class {
             return this._buffer;
         }
         const position = this._position;
-        this.skip(length !== undefined ? length : this._length - this._position);
+        this.skip(length === undefined ? this._length - this._position : length);
         const end = this._position;
         this.seek(position);
         return this._buffer.subarray(position, end);
@@ -310,7 +334,7 @@ base.BinaryStream = class {
             return this._buffer;
         }
         const position = this._position;
-        this.skip(length !== undefined ? length : this._length - this._position);
+        this.skip(length === undefined ? this._length - this._position : length);
         return this._buffer.subarray(position, this._position);
     }
 };
@@ -357,11 +381,16 @@ base.BufferReader = class {
         }
     }
 
-    align(mod) {
-        const remainder = this.position % mod;
+    align(size) {
+        const remainder = this.position % size;
         if (remainder !== 0) {
-            this.skip(mod - remainder);
+            this.skip(size - remainder);
         }
+    }
+
+    stream(length) {
+        const buffer = this.read(length);
+        return new base.BinaryStream(buffer);
     }
 
     peek(length) {
@@ -369,7 +398,7 @@ base.BufferReader = class {
             return this._buffer;
         }
         const position = this._position;
-        this.skip(length !== undefined ? length : this._length - this._position);
+        this.skip(length === undefined ? this._length - this._position : length);
         const end = this._position;
         this._position = position;
         return this._buffer.slice(position, end);
@@ -381,7 +410,7 @@ base.BufferReader = class {
             return this._buffer;
         }
         const position = this._position;
-        this.skip(length !== undefined ? length : this._length - this._position);
+        this.skip(length === undefined ? this._length - this._position : length);
         return this._buffer.slice(position, this._position);
     }
 
@@ -455,7 +484,7 @@ base.BufferReader = class {
     }
 
     boolean() {
-        return this.byte() !== 0 ? true : false;
+        return this.byte() === 0 ? false : true;
     }
 };
 
@@ -484,10 +513,10 @@ base.StreamReader = class {
         this._stream.skip(offset);
     }
 
-    align(mod) {
-        const remainder = this.position % mod;
+    align(size) {
+        const remainder = this.position % size;
         if (remainder !== 0) {
-            this.skip(mod - remainder);
+            this.skip(size - remainder);
         }
     }
 
@@ -562,7 +591,517 @@ base.StreamReader = class {
     }
 
     boolean() {
-        return this.byte() !== 0 ? true : false;
+        return this.byte() === 0 ? false : true;
+    }
+};
+
+base.Tensor = class {
+
+    constructor(tensor) {
+        this._tensor = tensor;
+        this.name = tensor.name || '';
+        this.encoding = tensor.encoding;
+        this.encoding = this.encoding === '' || this.encoding === undefined ? '<' : this.encoding;
+        this.type = tensor.type;
+        this.layout = tensor.type.layout;
+        this.stride = tensor.stride;
+        base.Tensor._dataTypes = base.Tensor._dataTypes || new Map([
+            ['boolean', 1],
+            ['qint8', 1], ['qint16', 2], ['qint32', 4],
+            ['quint8', 1], ['quint16', 2], ['quint32', 4],
+            ['xint8', 1],
+            ['int8', 1], ['int16', 2], ['int32', 4], ['int64', 8],
+            ['uint8', 1], ['uint16', 2], ['uint32', 4,], ['uint64', 8],
+            ['float16', 2], ['float32', 4], ['float64', 8], ['bfloat16', 2],
+            ['complex64', 8], ['complex128', 16],
+            ['float8e4m3fn', 1], ['float8e4m3fnuz', 1], ['float8e5m2', 1], ['float8e5m2fnuz', 1]
+        ]);
+    }
+
+    get values() {
+        this._read();
+        return this._values;
+    }
+
+    get indices() {
+        this._read();
+        return this._indices;
+    }
+
+    get data() {
+        this._read();
+        if (this._data && this._data.peek) {
+            this._data = this._data.peek();
+        }
+        return this._data;
+    }
+
+    get metrics() {
+        return this._tensor.metrics;
+    }
+
+    get empty() {
+        switch (this.layout) {
+            case 'sparse':
+            case 'sparse.coo': {
+                return !this.values || !this.indices || this.values.values === null || this.values.values.length === 0;
+            }
+            default: {
+                switch (this.encoding) {
+                    case '<':
+                    case '>':
+                        return !(Array.isArray(this.data) || this.data instanceof Uint8Array || this.data instanceof Int8Array) || this.data.length === 0;
+                    case '|':
+                        return !(Array.isArray(this.values) || ArrayBuffer.isView(this.values)) || this.values.length === 0;
+                    default:
+                        throw new Error(`Unsupported tensor encoding '${this.encoding}'.`);
+                }
+            }
+        }
+    }
+
+    get value() {
+        const context = this._context();
+        context.limit = Number.MAX_SAFE_INTEGER;
+        switch (context.encoding) {
+            case '<':
+            case '>': {
+                return this._decodeData(context, 0, 0);
+            }
+            case '|': {
+                return this._decodeValues(context, 0, 0);
+            }
+            default: {
+                throw new Error(`Unsupported tensor encoding '${context.encoding}'.`);
+            }
+        }
+    }
+
+    toString() {
+        const context = this._context();
+        context.limit = 10000;
+        switch (context.encoding) {
+            case '<':
+            case '>': {
+                const value = this._decodeData(context, 0, 0);
+                return base.Tensor._stringify(value, '', '    ');
+            }
+            case '|': {
+                const value = this._decodeValues(context, 0, 0);
+                return base.Tensor._stringify(value, '', '    ');
+            }
+            default: {
+                throw new Error(`Unsupported tensor encoding '${context.encoding}'.`);
+            }
+        }
+    }
+
+    _context() {
+        this._read();
+        if (this.encoding !== '<' && this.encoding !== '>' && this.encoding !== '|') {
+            throw new Error(`Tensor encoding '${this.encoding}' is not supported.`);
+        }
+        if (this.layout && (this.layout !== 'sparse' && this.layout !== 'sparse.coo')) {
+            throw new Error(`Tensor layout '${this.layout}' is not supported.`);
+        }
+        const dataType = this.type.dataType;
+        const context = {};
+        context.encoding = this.encoding;
+        context.dimensions = this.type.shape.dimensions.map((value) => typeof value === 'bigint' ? value.toNumber() : value);
+        context.dataType = dataType;
+        const shape = context.dimensions;
+        context.stride = this.stride;
+        if (!Array.isArray(context.stride) ||
+            (Array.isArray(context.stride) && context.stride.length === 0 && shape.length === 0)) {
+            const length = shape.length === 0 ? 1 : shape.length;
+            context.stride = new Array(length);
+            let value = 1;
+            for (let i = length - 1; i >= 0; i--) {
+                context.stride[i] = value;
+                value *= shape[i];
+            }
+        }
+        switch (this.layout) {
+            case 'sparse': {
+                const indices = new base.Tensor(this.indices).value;
+                const values = new base.Tensor(this.values).value;
+                context.data = this._decodeSparse(dataType, context.dimensions, indices, values);
+                context.encoding = '|';
+                break;
+            }
+            case 'sparse.coo': {
+                const values = new base.Tensor(this.values).value;
+                const data = new base.Tensor(this.indices).value;
+                const dimensions = context.dimensions.length;
+                let stride = 1;
+                const strides = context.dimensions.slice().reverse().map((dim) => {
+                    const value = stride;
+                    stride *= dim;
+                    return value;
+                }).reverse();
+                const indices = new Uint32Array(values.length);
+                for (let i = 0; i < dimensions; i++) {
+                    const stride = strides[i];
+                    const dimension = data[i];
+                    for (let j = 0; j < indices.length; j++) {
+                        indices[j] += dimension[j].toNumber() * stride;
+                    }
+                }
+                context.data = this._decodeSparse(dataType, context.dimensions, indices, values);
+                context.encoding = '|';
+                break;
+            }
+            default: {
+                switch (this.encoding) {
+                    case '<':
+                    case '>': {
+                        context.data = (this.data instanceof Uint8Array || this.data instanceof Int8Array) ? this.data : this.data.peek();
+                        context.view = new DataView(context.data.buffer, context.data.byteOffset, context.data.byteLength);
+                        if (base.Tensor._dataTypes.has(dataType)) {
+                            const itemsize = base.Tensor._dataTypes.get(dataType);
+                            const length = context.data.length;
+                            const stride = context.stride;
+                            if (length < (itemsize * shape.reduce((a, v) => a * v, 1))) {
+                                const max = stride.reduce((a, v, i) => v > stride[i] ? i : a, 0);
+                                if (length !== (itemsize * stride[max] * shape[max])) {
+                                    throw new Error('Invalid tensor data size.');
+                                }
+                            }
+                            context.itemsize = itemsize;
+                            context.stride = stride.map((v) => v * itemsize);
+                        } else if (dataType.startsWith('uint') && !isNaN(parseInt(dataType.substring(4), 10))) {
+                            context.dataType = 'uint';
+                            context.bits = parseInt(dataType.substring(4), 10);
+                            context.itemsize = 1;
+                        } else if (dataType.startsWith('int') && !isNaN(parseInt(dataType.substring(3), 10))) {
+                            context.dataType = 'int';
+                            context.bits = parseInt(dataType.substring(3), 10);
+                            context.itemsize = 1;
+                        } else if (dataType === 'float4e2m1') {
+                            context.dataType = 'float4e2m1';
+                            context.bits = 4;
+                            context.itemsize = 1;
+                        } else {
+                            throw new Error(`Tensor data type '${dataType}' is not implemented.`);
+                        }
+                        break;
+                    }
+                    case '|': {
+                        context.data = this.values;
+                        if (!base.Tensor._dataTypes.has(dataType) && dataType !== 'string' && dataType !== 'object' && dataType !== 'void') {
+                            throw new Error(`Tensor data type '${dataType}' is not implemented.`);
+                        }
+                        const size = context.dimensions.reduce((a, v) => a * v, 1);
+                        if (size !== this.values.length) {
+                            throw new Error('Invalid tensor data length.');
+                        }
+                        break;
+                    }
+                    default: {
+                        throw new Error(`Unsupported tensor encoding '${this.encoding}'.`);
+                    }
+                }
+            }
+        }
+        context.index = 0;
+        context.count = 0;
+        return context;
+    }
+
+    _decodeSparse(dataType, dimensions, indices, values) {
+        const size = dimensions.reduce((a, b) => a * b, 1);
+        const array = new Array(size);
+        switch (dataType) {
+            case 'boolean':
+                array.fill(false);
+                break;
+            default:
+                array.fill(0);
+                break;
+        }
+        if (indices.length > 0) {
+            if (Object.prototype.hasOwnProperty.call(indices[0], 'low')) {
+                for (let i = 0; i < indices.length; i++) {
+                    const index = indices[i].toNumber();
+                    array[index] = values[i];
+                }
+            } else {
+                for (let i = 0; i < indices.length; i++) {
+                    array[indices[i]] = values[i];
+                }
+            }
+        }
+        return array;
+    }
+
+    _decodeData(context, dimension, offset) {
+        const results = [];
+        const shape = context.dimensions.length === 0 ? [1] : context.dimensions;
+        const size = shape[dimension];
+        const dataType = context.dataType;
+        const view = context.view;
+        const stride = context.stride[dimension];
+        if (dimension === shape.length - 1) {
+            const ellipsis = (context.count + size) > context.limit;
+            const length = ellipsis ? context.limit - context.count : size;
+            const max = offset + (length * stride);
+            switch (dataType) {
+                case 'boolean':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getUint8(offset) !== 0);
+                    }
+                    break;
+                case 'qint8':
+                case 'xint8':
+                case 'int8':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getInt8(offset));
+                    }
+                    break;
+                case 'qint16':
+                case 'int16':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getInt16(offset, this._littleEndian));
+                    }
+                    break;
+                case 'qint32':
+                case 'int32':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getInt32(offset, this._littleEndian));
+                    }
+                    break;
+                case 'int64':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getBigInt64(offset, this._littleEndian));
+                    }
+                    break;
+                case 'int':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getIntBits(offset, context.bits, this._littleEndian));
+                    }
+                    break;
+                case 'quint8':
+                case 'uint8':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getUint8(offset));
+                    }
+                    break;
+                case 'quint16':
+                case 'uint16':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getUint16(offset, this._littleEndian));
+                    }
+                    break;
+                case 'quint32':
+                case 'uint32':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getUint32(offset, this._littleEndian));
+                    }
+                    break;
+                case 'uint64':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getBigUint64(offset, this._littleEndian));
+                    }
+                    break;
+                case 'uint':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getUintBits(offset, context.bits, this._littleEndian));
+                    }
+                    break;
+                case 'float16':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getFloat16(offset, this._littleEndian));
+                    }
+                    break;
+                case 'float32':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getFloat32(offset, this._littleEndian));
+                    }
+                    break;
+                case 'float64':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getFloat64(offset, this._littleEndian));
+                    }
+                    break;
+                case 'bfloat16':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getBfloat16(offset, this._littleEndian));
+                    }
+                    break;
+                case 'complex64':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getComplex64(offset, this._littleEndian));
+                    }
+                    break;
+                case 'complex128':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getComplex128(offset, this._littleEndian));
+                    }
+                    break;
+                case 'float4e2m1':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getFloat4e2m1(offset));
+                    }
+                    break;
+                case 'float8e4m3fn':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getFloat8e4m3(offset, true, false));
+                    }
+                    break;
+                case 'float8e4m3fnuz':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getFloat8e4m3(offset, true, true));
+                    }
+                    break;
+                case 'float8e5m2':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getFloat8e5m2(offset, false, false));
+                    }
+                    break;
+                case 'float8e5m2fnuz':
+                    for (; offset < max; offset += stride) {
+                        results.push(view.getFloat8e5m2(offset, true, true));
+                    }
+                    break;
+                default:
+                    throw new Error(`Unsupported tensor data type '${dataType}'.`);
+            }
+            context.count += length;
+            if (ellipsis) {
+                results.push('...');
+            }
+        } else {
+            for (let j = 0; j < size; j++) {
+                if (context.count >= context.limit) {
+                    results.push('...');
+                    return results;
+                }
+                const nextOffset = offset + (j * stride);
+                results.push(this._decodeData(context, dimension + 1, nextOffset));
+            }
+        }
+        if (context.dimensions.length === 0) {
+            return results[0];
+        }
+        return results;
+    }
+
+    _decodeValues(context, dimension, position) {
+        const results = [];
+        const shape = (context.dimensions.length === 0) ? [1] : context.dimensions;
+        const size = shape[dimension];
+        const dataType = context.dataType;
+        const stride = context.stride[dimension];
+        if (dimension === shape.length - 1) {
+            const ellipsis = (context.count + size) > context.limit;
+            const length = ellipsis ? context.limit - context.count : size;
+            const data = context.data;
+            for (let i = 0; i < length; i++) {
+                if (context.count > context.limit) {
+                    results.push('...');
+                    return results;
+                }
+                switch (dataType) {
+                    case 'boolean':
+                        results.push(data[position] === 0 ? false : true);
+                        break;
+                    default:
+                        results.push(data[position]);
+                        break;
+                }
+                position += stride;
+                context.count++;
+            }
+        } else {
+            for (let i = 0; i < size; i++) {
+                if (context.count >= context.limit) {
+                    results.push('...');
+                    return results;
+                }
+                const nextPosition = position + (i * stride);
+                results.push(this._decodeValues(context, dimension + 1, nextPosition));
+            }
+        }
+        if (context.dimensions.length === 0) {
+            return results[0];
+        }
+        return results;
+    }
+
+    static _stringify(value, indentation, indent) {
+        if (Array.isArray(value)) {
+            const length = value.length;
+            if (length > 0) {
+                const array = new Array(length);
+                const space = indentation + indent;
+                for (let i = 0; i < length; i++) {
+                    array[i] = base.Tensor._stringify(value[i], space, indent);
+                }
+                return `${indentation}[\n${array.join(',\n')}\n${indentation}]`;
+            }
+            return `${indentation}[\n${indentation}]`;
+        }
+        if (value === null) {
+            return `${indentation}null`;
+        }
+        switch (typeof value) {
+            case 'boolean':
+            case 'number':
+            case 'bigint':
+                return `${indentation}${value}`;
+            case 'string':
+                return `${indentation}"${value}"`;
+            default:
+                if (value instanceof Uint8Array) {
+                    let content = '';
+                    for (let i = 0; i < value.length; i++) {
+                        const x = value[i];
+                        content += x >= 32 && x <= 126 ? String.fromCharCode(x) : `\\x${x.toString(16).padStart(2, '0')}`;
+                    }
+                    return `${indentation}"${content}"`;
+                }
+                if (value && value.toString) {
+                    return `${indentation}${value.toString()}`;
+                }
+                return `${indentation}(undefined)`;
+        }
+    }
+
+    _read() {
+        if (this._values === undefined) {
+            this._values = null;
+            switch (this.encoding) {
+                case undefined:
+                case '<': {
+                    this._data = this._tensor.values;
+                    this._littleEndian = true;
+                    break;
+                }
+                case '>': {
+                    this._data = this._tensor.values;
+                    this._littleEndian = false;
+                    break;
+                }
+                case '|': {
+                    this._values = this._tensor.values;
+                    break;
+                }
+                default: {
+                    throw new Error(`Unsupported tensor encoding '${this.encoding}'.`);
+                }
+            }
+            switch (this.layout) {
+                case 'sparse':
+                case 'sparse.coo': {
+                    this._indices = this._tensor.indices;
+                    this._values = this._tensor.values;
+                    break;
+                }
+                default: {
+                    break;
+                }
+            }
+        }
     }
 };
 
@@ -680,7 +1219,7 @@ base.Telemetry = class {
     send(name, params) {
         if (this._session) {
             try {
-                params = Object.assign({ event_name: name }, this._metadata, /* { debug_mode: true },*/ params);
+                params = { event_name: name, ...this._metadata, ...params };
                 this._metadata = {};
                 if (this._update()) {
                     params.engagement_time_msec = this._engagement_time_msec;
@@ -694,7 +1233,7 @@ base.Telemetry = class {
                 this._navigator.sendBeacon(url, body);
                 this._session[2] = this.get('session_engaged') || '0';
                 this.set('hit_count', this.get('hit_count') + 1);
-            } catch (e) {
+            } catch {
                 // continue regardless of error
             }
         }
@@ -720,19 +1259,19 @@ base.Metadata = class {
 
     get extensions() {
         return [
-            'onnx', 'tflite', 'pb', 'pt', 'pt2', 'pth', 'h5', 'pbtxt', 'prototxt', 'caffemodel', 'mlmodel', 'mlpackage',
+            'onnx', 'tflite', 'pb', 'pt', 'pt2', 'pte', 'pth', 'h5', 'pbtxt', 'prototxt', 'caffemodel', 'mlmodel', 'mlpackage',
             'model', 'json', 'xml', 'cfg', 'weights', 'bin',
             'ort',
             'dnn', 'cmf',
             'gguf',
             'hd5', 'hdf5', 'keras',
             'tfl', 'circle', 'lite',
-            'mlnet', 'mar', 'maxviz', 'meta', 'nn', 'ngf', 'hn', 'har',
+            'mlnet', 'mar', 'maxviz', 'meta', 'nn', 'ngf', 'hn',
             'param', 'params',
             'paddle', 'pdiparams', 'pdmodel', 'pdopt', 'pdparams', 'nb',
-            'pkl', 'joblib', 'safetensors',
+            'pkl', 'pickle', 'joblib', 'safetensors',
             'ptl', 't7',
-            'dlc', 'uff', 'armnn',
+            'dlc', 'uff', 'armnn', 'kann', 'kgraph',
             'mnn', 'ms', 'ncnn', 'om', 'tm', 'mge', 'tmfile', 'tnnproto', 'xmodel', 'kmodel', 'rknn',
             'tar', 'zip'
         ];
@@ -743,5 +1282,6 @@ export const Complex64 = base.Complex64;
 export const Complex128 = base.Complex128;
 export const BinaryStream = base.BinaryStream;
 export const BinaryReader = base.BinaryReader;
+export const Tensor = base.Tensor;
 export const Telemetry = base.Telemetry;
 export const Metadata = base.Metadata;

@@ -13,7 +13,7 @@ dnn.Model = class Model {
 
     static decode(reader, length) {
         const message = new dnn.Model();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -56,12 +56,9 @@ dnn.Model.prototype.a014 = 0;
 
 dnn.Parameter = class Parameter {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new dnn.Parameter();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -85,12 +82,9 @@ dnn.Parameter.prototype.shape = null;
 
 dnn.Shape = class Shape {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new dnn.Shape();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -129,7 +123,7 @@ dnn.Node = class Node {
 
     static decode(reader, length) {
         const message = new dnn.Node();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -161,7 +155,7 @@ dnn.Layer = class Layer {
 
     static decode(reader, length) {
         const message = new dnn.Layer();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -296,12 +290,9 @@ dnn.Layer.prototype.a116 = 0;
 
 dnn.Buffer = class Buffer {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new dnn.Buffer();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -321,12 +312,9 @@ dnn.Buffer.prototype.data = new Uint8Array([]);
 
 dnn.Tensor = class Tensor {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new dnn.Tensor();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {

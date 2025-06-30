@@ -3,11 +3,12 @@ const xmodel = {};
 
 xmodel.ModelFactory = class {
 
-    match(context) {
-        const tags = context.tags('pb');
+    async match(context) {
+        const tags = await context.tags('pb');
         if (tags.get(5) === 2) {
-            context.type = 'xmodel.pb';
+            return context.set('xmodel.pb');
         }
+        return null;
     }
 
     async open(context) {
@@ -15,7 +16,7 @@ xmodel.ModelFactory = class {
         xmodel.proto = xmodel.proto.serial_v2;
         let graph = null;
         try {
-            const reader = context.read('protobuf.binary');
+            const reader = await context.read('protobuf.binary');
             graph = xmodel.proto.Graph.decode(reader);
         } catch (error) {
             const message = error && error.message ? error.message : error.toString();
@@ -80,9 +81,11 @@ xmodel.Graph = class {
 
 xmodel.Argument = class {
 
-    constructor(name, value) {
+    constructor(name, value, type, visible) {
         this.name = name;
         this.value = value;
+        this.type = type || null;
+        this.visible = visible !== false;
     }
 };
 
@@ -120,35 +123,32 @@ xmodel.Node = class {
             for (const [name, obj] of Object.entries(op_node.op_attr)) {
                 if (name === 'device') {
                     this.device = obj.string_value;
-                    continue;
-                }
-                if (name === 'workload') {
-                    continue;
-                }
-                if (name.startsWith('quant_in_') || name.startsWith('quant_out_')) {
-                    continue;
-                }
-                const value = xmodel.Utility.attribute(obj);
-                if (name === 'nonlinear' && value.value && value.value !== 'NONE' && value.value !== 0) {
-                    let activation = value.value;
-                    if (typeof activation === 'string') {
-                        activation = activation.toLowerCase();
-                    } else if (Number.isInteger(activation) && activation < 5) {
-                        activation = ['none', 'relu', 'prelu', 'leakyrelu', 'relu6'][activation];
+                } else if (name !== 'workload' && !name.startsWith('quant_in_') && !name.startsWith('quant_out_')) {
+                    const attr = xmodel.Utility.attribute(obj);
+                    if (name === 'nonlinear' && attr.value && attr.value !== 'NONE' && attr.value !== 0) {
+                        let activation = attr.value;
+                        if (typeof activation === 'string') {
+                            activation = activation.toLowerCase();
+                        } else if (Number.isInteger(activation) && activation < 5) {
+                            activation = ['none', 'relu', 'prelu', 'leakyrelu', 'relu6'][activation];
+                        } else {
+                            activation = JSON.stringify(activation);
+                        }
+                        const node = new xmodel.Node(metadata, { op_type: activation }, values);
+                        this.chain.push(node);
                     } else {
-                        activation = JSON.stringify(activation);
+                        const schema = metadata.attribute(this.type.name, name);
+                        const visible = (schema && schema.default !== undefined && schema.default === attr.value) ||
+                            (schema && Array.isArray(schema.default) && Array.isArray(this.value) && schema.default.length === attr.value.length && schema.default.every((value, index) => value === attr.value[index])) ? false : true;
+                        const attribute = new xmodel.Argument(name, attr.value, attr.type, visible);
+                        this.attributes.push(attribute);
                     }
-                    this.chain.push(new xmodel.Node(metadata, { op_type: activation }, values));
-                    continue;
                 }
-                const attribute = new xmodel.Attribute(metadata.attribute(this.type, name), name, value);
-                this.attributes.push(attribute);
             }
         }
         if (op_node.args) {
             for (const input of op_node.args) {
-                const args = input.arg_ops.map((arg_op) => values.map(arg_op));
-                const argument = new xmodel.Argument(input.arg_name, args);
+                const argument = new xmodel.Argument(input.arg_name, input.arg_ops.map((arg_op) => values.map(arg_op)));
                 this.inputs.push(argument);
             }
         }
@@ -159,38 +159,20 @@ xmodel.Node = class {
     }
 };
 
-xmodel.Attribute = class {
-
-    constructor(metadata, name, attribute) {
-        this.name = name;
-        this.type = attribute.type;
-        this.value = attribute.value;
-        if (metadata) {
-            if (metadata.default !== undefined) {
-                if (metadata.default === this.value) {
-                    this.visible = false;
-                }
-                if (Array.isArray(metadata.default) && Array.isArray(this.value) &&
-                    metadata.default.length === this.value.length && metadata.default.every((value, index) => value === this.value[index])) {
-                    this.visible = false;
-                }
-            }
-        }
-    }
-};
-
 xmodel.TensorType = class {
 
     constructor(tensor) {
+        let type = '';
         switch (tensor.data_type) {
-            case 0: this.dataType = 'int'; break;
-            case 1: this.dataType = 'uint'; break;
-            case 2: this.dataType = 'xint'; break;
-            case 4: this.dataType = 'float'; break;
-            case 3: this.dataType = 'xuint'; break;
+            case 0: type = 'int'; break;
+            case 1: type = 'uint'; break;
+            case 2: type = 'xint'; break;
+            case 3: type = 'xuint'; break;
+            case 4: type = 'float'; break;
+            case 5: type = 'bfloat'; break;
             default: throw new xmodel.Error(`Unsupported data type '${tensor.data_type}'.`);
         }
-        this.dataType += tensor.tensor_bit_width.toString();
+        this.dataType = type + tensor.tensor_bit_width.toString();
         this.shape = new xmodel.TensorShape(tensor.tensor_dim);
         if (tensor.tensor_attr) {
             const attr = {};
@@ -255,17 +237,18 @@ xmodel.Utility = class {
         const type = key.replace(/_value$/, '');
         const value = attr_value[attr_value.value];
         switch (type) {
-            case 'bool': return { type: 'boolean', value: value };
-            case 'int32': return { type: 'int32', value: value };
+            case 'bool': return { type: 'boolean', value };
+            case 'int32': return { type: 'int32', value };
             case 'int32_vec': return { type: 'int32[]', value: value.value };
-            case 'uint32': return { type: 'uint32', value: value };
+            case 'uint32': return { type: 'uint32', value };
             case 'uint32_vec': return { type: 'uint32[]', value: value.value };
-            case 'int64': return { type: 'int64', value: value };
-            case 'uint64': return { type: 'uint64', value: value };
-            case 'float': return { type: 'float32', value: value };
+            case 'int64': return { type: 'int64', value };
+            case 'uint64': return { type: 'uint64', value };
+            case 'float': return { type: 'float32', value };
             case 'float_vec': return { type: 'float32[]', value: value.value };
-            case 'double': return { type: 'float64', value: value };
-            case 'string': return { type: 'string', value: value };
+            case 'double': return { type: 'float64', value };
+            case 'double_vec': return { type: 'float64[]', value };
+            case 'string': return { type: 'string', value };
             case 'string_vec':  return { type: 'string[]', value: value.value };
             case 'bytes': return { type: 'byte[]', value: value.value };
             case 'map_string_2_int32': return { type: 'map<string,int32>', value: value.value };
@@ -328,7 +311,7 @@ xmodel.Metadata = class {
             ['transposed-depthwise-conv2d-fix', 'Layer'],
             ['upsample-fix', 'Data'],
         ];
-        this._types = new Map(categories.map(([name, category]) => [name, { name: name, category: category }]));
+        this._types = new Map(categories.map(([name, category]) => [name, { name, category }]));
         for (const op_def of op_defs) {
             const type = this._types.get(op_def.name) || { name: op_def.name };
             if (op_def.annotation) {
@@ -360,7 +343,7 @@ xmodel.Metadata = class {
 
     type(name) {
         if (!this._types.has(name)) {
-            this._types.set(name, { name: name });
+            this._types.set(name, { name });
         }
         return this._types.get(name);
     }

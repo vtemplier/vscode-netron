@@ -13,6 +13,11 @@
     "category": "Transform"
   },
   {
+    "name": "Attention",
+    "operator": 299,
+    "category": "Attention"
+  },
+  {
     "name": "BatchMatMul",
     "operator": 106
   },
@@ -129,7 +134,8 @@
   },
   {
     "name": "Dequantize",
-    "operator": 19
+    "operator": 19,
+    "category": "Quantization"
   },
   {
     "name": "DetectionOutput",
@@ -390,7 +396,8 @@
   },
   {
     "name": "QuantizeV2",
-    "operator": 64
+    "operator": 64,
+    "category": "Quantization"
   },
   {
     "name": "Range",
@@ -610,6 +617,7 @@
   },
   {
     "name": "Unsqueeze",
+    "category": "Transform",
     "operator": 107
   },
   {

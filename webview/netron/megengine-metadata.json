@@ -431,31 +431,26 @@
   },
   {
     "name": "megengine.functional.loss.l1_loss",
-    "attributes": [],
     "category": "Layer",
     "varargs": "args"
   },
   {
     "name": "megengine.functional.loss.square_loss",
-    "attributes": [],
     "category": "Layer",
     "varargs": "args"
   },
   {
     "name": "megengine.functional.loss.cross_entropy",
-    "attributes": [],
     "category": "Layer",
     "varargs": "args"
   },
   {
     "name": "megengine.functional.loss.binary_cross_entropy",
-    "attributes": [],
     "category": "Layer",
     "varargs": "args"
   },
   {
     "name": "megengine.functional.loss.hinge_loss",
-    "attributes": [],
     "category": "Layer",
     "varargs": "args"
   },
@@ -637,7 +632,6 @@
   },
   {
     "name": "megengine.functional.math.topk",
-    "attributes": [],
     "category": "Layer",
     "varargs": "args"
   },
@@ -809,7 +803,7 @@
       { "name": "drop_prob" },
       { "name": "training" }
     ],
-    "category": "Layer"
+    "category": "Dropout"
   },
   {
     "name": "megengine.functional.nn.embedding",
@@ -820,7 +814,7 @@
       { "name": "max_norm" },
       { "name": "norm_type" }
     ],
-    "category": "Layer"
+    "category": "Transform"
   },
   {
     "name": "megengine.functional.nn.gelu",
@@ -1097,7 +1091,6 @@
   },
   {
     "name": "megengine.functional.debug_param.get_execution_strategy",
-    "attributes": [],
     "category": "Layer"
   },
   {
@@ -1363,7 +1356,7 @@
       { "name": "inp" },
       { "name": "pattern" }
     ],
-    "category": "Shape"
+    "category": "Transform"
   },
   {
     "name": "megengine.functional.tensor.swapaxes",
@@ -1834,7 +1827,7 @@
     "attributes": [
       { "name": "self" }
     ],
-    "category": "Shape",
+    "category": "Transform",
     "varargs": "args"
   },
   {
@@ -1913,8 +1906,7 @@
     "attributes": [
       { "name": "self" },
       { "name": "index" }
-    ],
-    "category": "Tensor"
+    ]
   },
   {
     "name": "__setitem__",
@@ -1922,8 +1914,7 @@
       { "name": "self" },
       { "name": "index" },
       { "name": "value" }
-    ],
-    "category": "Tensor"
+    ]
   },
   {
     "name": "megengine.module.adaptive_pooling.AdaptiveAvgPool2d",
@@ -1999,7 +1990,7 @@
   },
   {
     "name": "megengine.module.dropout.Dropout",
-    "category": "Layer"
+    "category": "Dropout"
   },
   {
     "name": "megengine.module.elemwise.Elemwise"
@@ -2470,6 +2461,10 @@
       { "name": "window_w", "type": "uint32", "default": 2 },
       { "name": "format", "type": "ConvolutionV0Format", "default": "NCHW" }
     ]
+  },
+  {
+    "name": "PoolingV1",
+    "category": "Pool"
   },
   {
     "name": "Pooling",
@@ -3478,7 +3473,6 @@
   },
   {
     "name": "Subtensor",
-    "category": "Tensor",
     "inputs": [
       { "name": "input" },
       { "name": "axis" }
@@ -3486,6 +3480,10 @@
   },
   {
     "name": "GetVarShape",
+    "category": "Shape"
+  },
+  {
+    "name": "GetVarShapeV1",
     "category": "Shape"
   },
   {

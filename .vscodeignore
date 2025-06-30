@@ -15,6 +15,9 @@ src/**
 tool/**
 .github/**
 
+# tests: unused
+_models/
+
 # lock
 package-lock.json
 yarn.lock

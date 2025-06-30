@@ -5,8 +5,8 @@ const sklearn = {};
 
 sklearn.ModelFactory = class {
 
-    match(context) {
-        const obj = context.peek('pkl');
+    async match(context) {
+        const obj = await context.peek('pkl');
         const validate = (obj, name) => {
             if (obj && obj.__class__ && obj.__class__.__module__ && obj.__class__.__name__) {
                 const key = `${obj.__class__.__module__}.${obj.__class__.__name__}`;
@@ -23,28 +23,24 @@ sklearn.ModelFactory = class {
         ];
         for (const format of formats) {
             if (validate(obj, format.name)) {
-                context.type = format.format;
-                context.target = obj;
-                return;
+                return context.set(format.format, obj);
             }
             if (Array.isArray(obj) && obj.length > 0 && obj.every((item) => validate(item, format.name))) {
-                context.type = `${format.format}.list`;
-                context.target = obj;
-                return;
+                return context.set(`${format.format}.list`, obj);
             }
-            if (Object(obj) === obj) {
-                const entries = Object.entries(obj);
+            if (Object(obj) === obj || obj instanceof Map) {
+                const entries = obj instanceof Map ? Array.from(obj) : Object.entries(obj);
                 if (entries.length > 0 && entries.every(([, value]) => validate(value, format.name))) {
-                    context.type = `${format.format}.map`;
-                    context.target = obj;
+                    return context.set(`${format.format}.map`, obj);
                 }
             }
         }
+        return null;
     }
 
     async open(context) {
         const metadata = await context.metadata('sklearn-metadata.json');
-        return new sklearn.Model(metadata, context.type, context.target);
+        return new sklearn.Model(metadata, context.type, context.value);
     }
 };
 
@@ -83,7 +79,8 @@ sklearn.Model = class {
             }
             case 'sklearn.map':
             case 'scipy.map': {
-                for (const [name, value] of Object.entries(obj)) {
+                const entries = obj instanceof Map ? Array.from(obj) : Object.entries(obj);
+                for (const [name, value] of entries) {
                     this.graphs.push(new sklearn.Graph(metadata, name, value));
                     if (value._sklearn_version) {
                         version.push(` v${value._sklearn_version}`);
@@ -108,74 +105,18 @@ sklearn.Graph = class {
         this.nodes = [];
         this.inputs = [];
         this.outputs = [];
-        this.groups = false;
-        const values = new Map();
-        values.map = (name) => {
-            if (!values.has(name)) {
-                values.set(name, new sklearn.Value(name, null, null));
-            }
-            return values.get(name);
-        };
-        const concat = (parent, name) => {
-            return (parent === '' ?  name : `${parent}/${name}`);
-        };
-        const process = (group, name, obj, inputs) => {
-            const type = `${obj.__class__.__module__}.${obj.__class__.__name__}`;
-            switch (type) {
-                case 'sklearn.pipeline.Pipeline': {
-                    this.groups = true;
-                    name = name || 'pipeline';
-                    const childGroup = concat(group, name);
-                    for (const step of obj.steps) {
-                        inputs = process(childGroup, step[0], step[1], inputs);
-                    }
-                    return inputs;
-                }
-                case 'sklearn.pipeline.FeatureUnion': {
-                    this.groups = true;
-                    const outputs = [];
-                    name = name || 'union';
-                    const output = concat(group, name);
-                    const subgroup = concat(group, name);
-                    const node = new sklearn.Node(metadata, subgroup, output, obj, inputs, [output], values);
-                    this.nodes.push(node);
-                    for (const transformer of obj.transformer_list) {
-                        outputs.push(...process(subgroup, transformer[0], transformer[1], [output]));
-                    }
-                    return outputs;
-                }
-                case 'sklearn.compose._column_transformer.ColumnTransformer': {
-                    this.groups = true;
-                    name = name || 'transformer';
-                    const output = concat(group, name);
-                    const subgroup = concat(group, name);
-                    const outputs = [];
-                    const node = new sklearn.Node(metadata, subgroup, output, obj, inputs, [output], values);
-                    this.nodes.push(node);
-                    for (const transformer of obj.transformers) {
-                        if (transformer[1] !== 'passthrough') {
-                            outputs.push(...process(subgroup, transformer[0], transformer[1], [output]));
-                        }
-                    }
-                    return outputs;
-                }
-                default: {
-                    const output = concat(group, name);
-                    const node = new sklearn.Node(metadata, group, output, obj, inputs, output === '' ? [] : [output], values);
-                    this.nodes.push(node);
-                    return [output];
-                }
-            }
-        };
-        process('', '', obj, []);
+        const node = new sklearn.Node(metadata, '', obj);
+        this.nodes.push(node);
     }
 };
 
 sklearn.Argument = class {
 
-    constructor(name, value) {
+    constructor(name, value, type, visible) {
         this.name = name;
         this.value = value;
+        this.type = type;
+        this.visible = visible !== false;
     }
 };
 
@@ -186,32 +127,19 @@ sklearn.Value = class {
             throw new sklearn.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
         this.name = name;
-        this._type = type || null;
+        this.type = initializer ? initializer.type : type;
         this.initializer = initializer || null;
-    }
-
-    get type() {
-        if (this.initializer) {
-            return this.initializer.type;
-        }
-        return this._type;
     }
 };
 
 sklearn.Node = class {
 
-    constructor(metadata, group, name, obj, inputs, outputs, values, stack) {
-        this.group = group || null;
+    constructor(metadata, name, obj, stack) {
         this.name = name || '';
         const type = obj.__class__ ? `${obj.__class__.__module__}.${obj.__class__.__name__}` : 'builtins.dict';
         this.type = metadata.type(type) || { name: type };
-        this.inputs = inputs.map((input) => new sklearn.Argument(input, [values.map(input)]));
-        this.outputs = outputs.map((output) => new sklearn.Argument(output, [values.map(output)]));
-        this.attributes = [];
-        const isArray = (obj) => {
-            return obj && obj.__class__ &&
-                obj.__class__.__module__ === 'numpy' && obj.__class__.__name__ === 'ndarray';
-        };
+        this.inputs = [];
+        this.outputs = [];
         const isObject = (obj) => {
             if (obj && typeof obj === 'object') {
                 const proto = Object.getPrototypeOf(obj);
@@ -219,93 +147,91 @@ sklearn.Node = class {
             }
             return false;
         };
-        const entries = Object.entries(obj);
-        for (const [name, value] of entries) {
-            if (name === '__class__') {
-                continue;
-            } else if (value && isArray(value)) {
-                const tensor = new sklearn.Tensor(value);
-                const attribute = new sklearn.Attribute(name, tensor, 'tensor');
-                this.attributes.push(attribute);
-            } else if (Array.isArray(value) && value.length > 0 && value.every((obj) => isArray(obj))) {
-                const tensors = value.map((obj) => new sklearn.Tensor(obj));
-                const attribute = new sklearn.Attribute(name, tensors, 'tensor[]');
-                this.attributes.push(attribute);
-            } else {
-                stack = stack || new Set();
-                if (value && Array.isArray(value) && value.every((obj) => typeof obj === 'string')) {
-                    const attribute = new sklearn.Attribute(name, value, 'string[]');
-                    this.attributes.push(attribute);
-                } else if (value && Array.isArray(value) && value.every((obj) => typeof obj === 'number')) {
-                    const attribute = new sklearn.Attribute(name, value);
-                    this.attributes.push(attribute);
-                } else if (value && value.__class__ && value.__class__.__module__ === 'builtins' && (value.__class__.__name__ === 'function' || value.__class__.__name__ === 'type')) {
-                    const obj = {};
-                    obj.__class__ = value;
-                    const node = new sklearn.Node(metadata, group, '', obj, [], [], null, stack);
-                    const attribute = new sklearn.Attribute(name, node, 'object');
-                    this.attributes.push(attribute);
-                } else if (value && Array.isArray(value) && value.length > 0 && value.every((obj) => obj && (obj.__class__ || obj === Object(obj)))) {
-                    const values = value.filter((value) => !stack.has(value));
-                    const nodes = values.map((value) => {
-                        stack.add(value);
-                        const node = new sklearn.Node(metadata, group, '', value, [], [], null, stack);
-                        stack.delete(value);
-                        return node;
-                    });
-                    const attribute = new sklearn.Attribute(name, nodes, 'object[]');
-                    this.attributes.push(attribute);
-                } else if (value && (value.__class__ || isObject(value))) {
-                    if (!stack.has(value)) {
-                        stack.add(value);
-                        const node = new sklearn.Node(metadata, group, '', value, [], [], null, stack);
-                        const attribute = new sklearn.Attribute(name, node, 'object');
-                        this.attributes.push(attribute);
-                        stack.delete(value);
-                    }
+        if (type === 'builtins.bytearray') {
+            const attribute = new sklearn.Argument('value', Array.from(obj), 'byte[]');
+            this.inputs.push(attribute);
+        } else {
+            const entries = Object.entries(obj);
+            for (const [name, value] of entries) {
+                if (name === '__class__') {
+                    continue;
+                } else if (value && sklearn.Utility.isTensor(value)) {
+                    const tensor = new sklearn.Tensor(value);
+                    const argument = new sklearn.Argument(name, tensor, 'tensor');
+                    this.inputs.push(argument);
+                } else if (Array.isArray(value) && value.length > 0 && value.every((obj) => sklearn.Utility.isTensor(obj))) {
+                    const tensors = value.map((obj) => new sklearn.Tensor(obj));
+                    const argument = new sklearn.Argument(name, tensors, 'tensor[]');
+                    this.inputs.push(argument);
+                } else if (sklearn.Utility.isType(value, 'builtins.bytearray')) {
+                    const argument = new sklearn.Argument(name, Array.from(value), 'byte[]');
+                    this.inputs.push(argument);
                 } else {
-                    const schema = metadata.attribute(type, name);
-                    if (schema) {
-                        let type = undefined;
-                        let visible = undefined;
-                        if (schema.type) {
-                            type = schema.type;
-                        }
-                        if (schema.visible === false || (schema.optional && value === null)) {
-                            visible = false;
-                        } else if (schema.default !== undefined) {
-                            if (Array.isArray(value)) {
-                                if (Array.isArray(schema.default)) {
-                                    visible = value.length !== schema.default || !value.every((item, index) => item === metadata.default[index]);
+                    stack = stack || new Set();
+                    if (value && Array.isArray(value) && value.every((obj) => typeof obj === 'string')) {
+                        const argument = new sklearn.Argument(name, value, 'string[]');
+                        this.inputs.push(argument);
+                    } else if (value && Array.isArray(value) && value.every((obj) => typeof obj === 'number')) {
+                        const argument = new sklearn.Argument(name, value, 'attribute');
+                        this.inputs.push(argument);
+                    } else if (sklearn.Utility.isType(value, 'builtins.function') || sklearn.Utility.isType(value, 'builtins.type')) {
+                        const node = new sklearn.Node(metadata, '', { __class__: value }, stack);
+                        const argument = new sklearn.Argument(name, node, 'object');
+                        this.inputs.push(argument);
+                    } else if (sklearn.Utility.isType(value, 'builtins.list') && value.every((value) => Array.isArray(value) && value.length === 2 && typeof value[0] === 'string')) {
+                        const chain = stack;
+                        const nodes = value.map(([name, value]) => {
+                            chain.add(value);
+                            const node = new sklearn.Node(metadata, name, value, chain);
+                            chain.delete(value);
+                            return node;
+                        });
+                        const argument = new sklearn.Argument(name, nodes, 'object[]');
+                        this.inputs.push(argument);
+                    } else if (value && Array.isArray(value) && value.length > 0 && value.every((obj) => obj && (obj.__class__ || obj === Object(obj)))) {
+                        const chain = stack;
+                        const values = value.filter((value) => !chain.has(value));
+                        const nodes = values.map((value) => {
+                            chain.add(value);
+                            const node = new sklearn.Node(metadata, '', value, null, chain);
+                            chain.delete(value);
+                            return node;
+                        });
+                        const argument = new sklearn.Argument(name, nodes, 'object[]');
+                        this.inputs.push(argument);
+                    } else if (value && (value.__class__ || isObject(value)) && !stack.has(value)) {
+                        stack.add(value);
+                        const node = new sklearn.Node(metadata, '', value, null, stack);
+                        const argument = new sklearn.Argument(name, node, 'object');
+                        this.inputs.push(argument);
+                        stack.delete(value);
+                    } else {
+                        let type = 'attribute';
+                        let visible = true;
+                        const schema = metadata.attribute(type, name);
+                        if (schema) {
+                            if (schema.type) {
+                                type = schema.type;
+                            }
+                            if (schema.visible === false || (schema.optional && value === null)) {
+                                visible = false;
+                            } else if (schema.default !== undefined) {
+                                if (Array.isArray(value)) {
+                                    if (Array.isArray(schema.default)) {
+                                        visible = value.length !== schema.default || !value.every((item, index) => item === metadata.default[index]);
+                                    } else {
+                                        visible = !value.every((item) => item === schema.default);
+                                    }
                                 } else {
-                                    visible = !value.every((item) => item === schema.default);
+                                    visible = value !== schema.default;
                                 }
-                            } else {
-                                visible = value !== schema.default;
                             }
                         }
-                        const attribute = new sklearn.Attribute(name, value, type, visible);
-                        this.attributes.push(attribute);
-                    } else {
-                        const attribute = new sklearn.Attribute(name, value);
-                        this.attributes.push(attribute);
+                        const argument = new sklearn.Argument(name, value, type, visible);
+                        this.inputs.push(argument);
                     }
                 }
             }
-        }
-    }
-};
-
-sklearn.Attribute = class {
-
-    constructor(name, value, type, visible) {
-        this.name = name;
-        this.value = value;
-        if (type) {
-            this.type = type;
-        }
-        if (visible === false) {
-            this.visible = visible;
         }
     }
 };
@@ -314,9 +240,9 @@ sklearn.Tensor = class {
 
     constructor(array) {
         this.type = new sklearn.TensorType(array.dtype.__name__, new sklearn.TensorShape(array.shape));
-        this.stride = array.strides.map((stride) => stride / array.itemsize);
+        this.stride = Array.isArray(array.strides) ? array.strides.map((stride) => stride / array.itemsize) : null;
         this.encoding = this.type.dataType === 'string' || this.type.dataType === 'object' ? '|' : array.dtype.byteorder;
-        this.values = this.type.dataType === 'string' || this.type.dataType === 'object' ? array.flatten().tolist() : array.tobytes();
+        this.values = this.type.dataType === 'string' || this.type.dataType === 'object' || this.type.dataType === 'void' ? array.flatten().tolist() : array.tobytes();
     }
 };
 
@@ -341,6 +267,17 @@ sklearn.TensorShape = class {
     toString() {
         return this.dimensions ? (`[${this.dimensions.map((dimension) => dimension.toString()).join(',')}]`) : '';
     }
+};
+
+sklearn.Utility = class {
+
+    static isType(obj, name) {
+        return obj && obj.__class__ && obj.__class__.__module__ && obj.__class__.__name__ && `${obj.__class__.__module__}.${obj.__class__.__name__}` === name;
+    }
+
+    static isTensor = (obj) => {
+        return sklearn.Utility.isType(obj, 'numpy.ndarray') || sklearn.Utility.isType(obj, 'numpy.matrix');
+    };
 };
 
 sklearn.Error = class extends Error {

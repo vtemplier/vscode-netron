@@ -5,11 +5,12 @@ const dnn = {};
 
 dnn.ModelFactory = class {
 
-    match(context) {
-        const tags = context.tags('pb');
+    async match(context) {
+        const tags = await context.tags('pb');
         if (tags.get(4) === 0 && tags.get(10) === 2) {
-            context.type = 'dnn';
+            return context.set('dnn');
         }
+        return null;
     }
 
     async open(context) {
@@ -17,7 +18,7 @@ dnn.ModelFactory = class {
         dnn.proto = dnn.proto.dnn;
         let model = null;
         try {
-            const reader = context.read('protobuf.binary');
+            const reader = await context.read('protobuf.binary');
             model = dnn.proto.Model.decode(reader);
         } catch (error) {
             const message = error && error.message ? error.message : error.toString();
@@ -44,14 +45,13 @@ dnn.Graph = class {
         this.outputs = [];
         this.nodes = [];
         const scope = {};
-        let index = 0;
-        for (const node of model.node) {
+        for (let i = 0; i < model.node.length; i++) {
+            const node = model.node[i];
             node.input = node.input.map((input) => scope[input] ? scope[input] : input);
             node.output = node.output.map((output) => {
-                scope[output] = scope[output] ? `${output}\n${index}` : output; // custom argument id
+                scope[output] = scope[output] ? `${output}\n${i}` : output; // custom argument id
                 return scope[output];
             });
-            index++;
         }
         const values = new Map();
         values.map = (name, type) => {
@@ -82,9 +82,7 @@ dnn.Graph = class {
             }
         }
         if (this.inputs.length === 0 &&  model.input_shape && model.input_shape.length === 4 && model.node.length > 0 && model.node[0].input.length > 0) {
-            /* eslint-disable prefer-destructuring */
-            const name = model.node[0].input[0];
-            /* eslint-enable prefer-destructuring */
+            const [name] = model.node[0].input;
             const shape = model.input_shape;
             const type = new dnn.TensorType('float32', new dnn.TensorShape([shape[1], shape[3], shape[2], shape[0]]));
             const argument = new dnn.Argument(name, [values.map(name, type)]);
@@ -171,7 +169,7 @@ dnn.Node = class {
                 return new dnn.Argument(inputName, [output]);
             });
         }
-        for (const key of Object.keys(layer)) {
+        for (const [key, obj] of Object.entries(layer)) {
             switch (key) {
                 case 'name':
                 case 'type':
@@ -180,20 +178,12 @@ dnn.Node = class {
                 case 'quantization':
                     break;
                 default: {
-                    const attribute = new dnn.Attribute(metadata.attribute(type, key), key, layer[key]);
+                    const attribute = new dnn.Argument(key, obj);
                     this.attributes.push(attribute);
                     break;
                 }
             }
         }
-    }
-};
-
-dnn.Attribute = class {
-
-    constructor(metadata, name, value) {
-        this.name = name;
-        this.value = value;
     }
 };
 
@@ -203,13 +193,13 @@ dnn.Tensor = class {
         const shape = new dnn.TensorShape([weight.dim0, weight.dim1, weight.dim2, weight.dim3]);
         this.values = quantization ? weight.quantized_data : weight.data;
         const size = shape.dimensions.reduce((a, b) => a * b, 1);
-        const itemSize = Math.floor(this.values.length / size);
-        const remainder = this.values.length - (itemSize * size);
-        if (remainder < 0 || remainder > itemSize) {
+        const itemsize = Math.floor(this.values.length / size);
+        const remainder = this.values.length - (itemsize * size);
+        if (remainder < 0 || remainder > itemsize) {
             throw new dnn.Error('Invalid tensor data size.');
         }
         let dataType = '?';
-        switch (itemSize) {
+        switch (itemsize) {
             case 1: dataType = 'int8'; break;
             case 2: dataType = 'float16'; break;
             case 4: dataType = 'float32'; break;

@@ -3,24 +3,22 @@ const armnn = {};
 
 armnn.ModelFactory = class {
 
-    match(context) {
+    async match(context) {
         const identifier = context.identifier;
-        const extension = identifier.split('.').pop().toLowerCase();
+        const extension = identifier.lastIndexOf('.') > 0 ? identifier.split('.').pop().toLowerCase() : '';
         if (extension === 'armnn') {
-            const reader = context.peek('flatbuffers.binary');
+            const reader = await context.peek('flatbuffers.binary');
             if (reader) {
-                context.type = 'armnn.flatbuffers';
-                context.target = reader;
-                return;
+                return context.set('armnn.flatbuffers', reader);
             }
         }
         if (extension === 'json') {
-            const obj = context.peek('json');
+            const obj = await context.peek('json');
             if (obj && obj.layers && obj.inputIds && obj.outputIds) {
-                context.type = 'armnn.flatbuffers.json';
-                context.target = obj;
+                return context.set('armnn.flatbuffers.json', obj);
             }
         }
+        return null;
     }
 
     async open(context) {
@@ -30,7 +28,7 @@ armnn.ModelFactory = class {
         switch (context.type) {
             case 'armnn.flatbuffers': {
                 try {
-                    const reader = context.read('flatbuffers.binary');
+                    const reader = await context.read('flatbuffers.binary');
                     model = armnn.schema.SerializedGraph.create(reader);
                 } catch (error) {
                     const message = error && error.message ? error.message : error.toString();
@@ -40,7 +38,7 @@ armnn.ModelFactory = class {
             }
             case 'armnn.flatbuffers.json': {
                 try {
-                    const reader = context.read('flatbuffers.text');
+                    const reader = await context.read('flatbuffers.text');
                     model = armnn.schema.SerializedGraph.createText(reader);
                 } catch (error) {
                     const message = error && error.message ? error.message : error.toString();
@@ -49,7 +47,7 @@ armnn.ModelFactory = class {
                 break;
             }
             default: {
-                throw new armnn.Error(`Unsupported Arm NN '${context.type}'.`);
+                throw new armnn.Error(`Unsupported Arm NN format '${context.type}'.`);
             }
         }
         const metadata = await context.metadata('armnn-metadata.json');
@@ -94,9 +92,7 @@ armnn.Graph = class {
         const layers = graph.layers.filter((layer) => {
             const base = armnn.Node.getBase(layer);
             if (base.layerType === armnn.schema.LayerType.Constant && base.outputSlots.length === 1 && layer.layer.input) {
-                /* eslint-disable prefer-destructuring */
-                const slot = base.outputSlots[0];
-                /* eslint-enable prefer-destructuring */
+                const [slot] = base.outputSlots;
                 const name = `${base.index}:${slot.index}`;
                 if (counts.get(name) === 1) {
                     const tensor = new armnn.Tensor(layer.layer.input, 'Constant');
@@ -143,8 +139,9 @@ armnn.Graph = class {
 armnn.Node = class {
 
     constructor(metadata, layer, value) {
-        const type = layer.layer.constructor.name;
-        this.type = Object.assign({}, metadata.type(type) || { name: type });
+        const name = layer.layer.constructor.name;
+        const type = metadata.type(name);
+        this.type = type ? { ...type } : { name };
         this.type.name = this.type.name.replace(/Layer$/, '');
         this.name = '';
         this.outputs = [];
@@ -157,26 +154,32 @@ armnn.Node = class {
             this.name = base.layerName;
             const inputs = [...base.inputSlots];
             while (inputs.length > 0) {
-                const inputSchema = inputSchemas.length > 0 ? inputSchemas.shift() : { name: '?' };
-                const count = inputSchema.list ? inputs.length : 1;
-                const argument = new armnn.Argument(inputSchema.name, inputs.splice(0, count).map((inputSlot) => {
+                const schema = inputSchemas.length > 0 ? inputSchemas.shift() : { name: '?' };
+                const count = schema.list ? inputs.length : 1;
+                const argument = new armnn.Argument(schema.name, inputs.splice(0, count).map((inputSlot) => {
                     return value(inputSlot.connection.sourceLayerIndex, inputSlot.connection.outputSlotIndex);
                 }));
                 this.inputs.push(argument);
             }
             const outputs = [...base.outputSlots];
             while (outputs.length > 0) {
-                const outputSchema = outputSchemas.length > 0 ? outputSchemas.shift() : { name: '?' };
-                const count = outputSchema.list ? outputs.length : 1;
-                this.outputs.push(new armnn.Argument(outputSchema.name, outputs.splice(0, count).map((outputSlot) => {
+                const schema = outputSchemas.length > 0 ? outputSchemas.shift() : { name: '?' };
+                const count = schema.list ? outputs.length : 1;
+                this.outputs.push(new armnn.Argument(schema.name, outputs.splice(0, count).map((outputSlot) => {
                     return value(base.index, outputSlot.index);
                 })));
             }
         }
         if (layer.layer) {
             if (layer.layer.descriptor && this.type.attributes) {
-                for (const [name, value] of Object.entries(layer.layer.descriptor)) {
-                    const attribute = new armnn.Attribute(metadata.attribute(type, name), name, value);
+                for (const [key, obj] of Object.entries(layer.layer.descriptor)) {
+                    const schema = metadata.attribute(name, key);
+                    const type = schema ? schema.type : null;
+                    let value = ArrayBuffer.isView(obj) ? Array.from(obj) : obj;
+                    if (armnn.schema[type]) {
+                        value = armnn.Utility.enum(type, value);
+                    }
+                    const attribute = new armnn.Argument(key, value, type);
                     this.attributes.push(attribute);
                 }
             }
@@ -197,23 +200,12 @@ armnn.Node = class {
     }
 };
 
-armnn.Attribute = class {
-
-    constructor(metadata, name, value) {
-        this.name = name;
-        this.type = metadata ? metadata.type : null;
-        this.value = ArrayBuffer.isView(value) ? Array.from(value) : value;
-        if (armnn.schema[this.type]) {
-            this.value = armnn.Utility.enum(this.type, this.value);
-        }
-    }
-};
-
 armnn.Argument = class {
 
-    constructor(name, value) {
+    constructor(name, value, type) {
         this.name = name;
         this.value = value;
+        this.type = type || null;
     }
 };
 

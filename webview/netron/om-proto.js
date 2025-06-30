@@ -40,9 +40,6 @@ ge.proto.DataType = {
 
 ge.proto.AttrDef = class AttrDef {
 
-    constructor() {
-    }
-
     get value() {
         ge.proto.AttrDef.valueSet = ge.proto.AttrDef.valueSet || new Set(["s", "i", "f", "b", "bt", "list", "func", "td", "t", "g", "list_list_int", "dt", "list_list_float"]);
         return Object.keys(this).find((key) => ge.proto.AttrDef.valueSet.has(key) && this[key] !== null);
@@ -50,7 +47,7 @@ ge.proto.AttrDef = class AttrDef {
 
     static decode(reader, length) {
         const message = new ge.proto.AttrDef();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -172,7 +169,7 @@ ge.proto.AttrDef.ListValue = class ListValue {
 
     static decode(reader, length) {
         const message = new ge.proto.AttrDef.ListValue();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -289,7 +286,7 @@ ge.proto.AttrDef.ListListInt = class ListListInt {
 
     static decode(reader, length) {
         const message = new ge.proto.AttrDef.ListListInt();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -330,7 +327,7 @@ ge.proto.AttrDef.ListListInt.ListInt = class ListInt {
 
     static decode(reader, length) {
         const message = new ge.proto.AttrDef.ListListInt.ListInt();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -371,7 +368,7 @@ ge.proto.AttrDef.ListListFloat = class ListListFloat {
 
     static decode(reader, length) {
         const message = new ge.proto.AttrDef.ListListFloat();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -412,7 +409,7 @@ ge.proto.AttrDef.ListListFloat.ListFloat = class ListFloat {
 
     static decode(reader, length) {
         const message = new ge.proto.AttrDef.ListListFloat.ListFloat();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -453,7 +450,7 @@ ge.proto.NamedAttrs = class NamedAttrs {
 
     static decode(reader, length) {
         const message = new ge.proto.NamedAttrs();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -502,7 +499,7 @@ ge.proto.ShapeDef = class ShapeDef {
 
     static decode(reader, length) {
         const message = new ge.proto.ShapeDef();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -543,7 +540,7 @@ ge.proto.TensorDescriptor = class TensorDescriptor {
 
     static decode(reader, length) {
         const message = new ge.proto.TensorDescriptor();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -698,12 +695,9 @@ ge.proto.TensorDescriptor.prototype.cmps_tab_offset = 0n;
 
 ge.proto.TensorDef = class TensorDef {
 
-    constructor() {
-    }
-
     static decode(reader, length) {
         const message = new ge.proto.TensorDef();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -767,7 +761,7 @@ ge.proto.OpDef = class OpDef {
 
     static decode(reader, length) {
         const message = new ge.proto.OpDef();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -931,7 +925,7 @@ ge.proto.GraphDef = class GraphDef {
 
     static decode(reader, length) {
         const message = new ge.proto.GraphDef();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
@@ -999,7 +993,7 @@ ge.proto.ModelDef = class ModelDef {
 
     static decode(reader, length) {
         const message = new ge.proto.ModelDef();
-        const end = length !== undefined ? reader.position + length : reader.length;
+        const end = length === undefined ? reader.length : reader.position + length;
         while (reader.position < end) {
             const tag = reader.uint32();
             switch (tag >>> 3) {
