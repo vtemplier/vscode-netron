@@ -1184,7 +1184,7 @@ pytorch.Container.Zip = class extends pytorch.Container {
             if (records.has('data.pkl')) {
                 return new pytorch.Container.Zip(entries);
             }
-            if (records.has('.data/version')) {
+            if (records.has('.data/version') && !records.has('archive_format')) {
                 return new pytorch.Container.Package(entries);
             }
         }
@@ -1391,42 +1391,71 @@ pytorch.Container.ExportedProgram = class extends pytorch.Container {
         if (program && program.schema_version && program.graph_module) {
             return new pytorch.Container.ExportedProgram(context, program);
         }
+        if (context.identifier === 'archive_format' && context.stream && context.stream.length < 10) {
+            const buffer = context.stream.peek();
+            const archive_format = String.fromCharCode.apply(null, buffer);
+            if (archive_format === 'pt2') {
+                return new pytorch.Container.ExportedProgram(context, null, context);
+            }
+        }
         return null;
     }
 
-    constructor(context, serialized_exported_program) {
+    constructor(context, exported_program, archive_format) {
         super();
         this.type = 'pytorch.export';
         this.context = context;
-        this.serialized_exported_program = serialized_exported_program;
+        this.archive_format = archive_format;
+        this.exported_program = exported_program;
     }
 
     async read(metadata) {
         this.format = 'PyTorch Export';
-        try {
-            const content = await this.context.fetch('version');
-            if (content) {
-                const reader = await content.read('text');
-                if (reader) {
-                    this.version = reader.read();
-                    this.version = this.version.split('\n').shift().trim();
+        const f = new Map();
+        const exported_programs = new Map();
+        if (this.archive_format) {
+            for (const name of this.context.container.entries.keys()) {
+                const match = name.match(/^models\/([^/]+)\.json$/);
+                if (match) {
+                    const [, model_name] = match;
+                    /* eslint-disable no-await-in-loop */
+                    const model = await this.context.fetch(`models/${model_name}.json`);
+                    const constants = await this._fetch(`data/constants/${model_name}.pt`);
+                    const sample_inputs = await this._fetch(`data/sample_inputs/${model_name}.pt`);
+                    const weights = await this._fetch(`data/weights/${model_name}.pt`);
+                    const exported_program = await model.read('json');
+                    /* eslint-enable no-await-in-loop */
+                    exported_programs.set(model_name, exported_program);
+                    f.set(`models/${model_name}.json`, exported_program);
+                    f.set(`data/weights/${model_name}.pt`, weights);
+                    f.set(`data/constants/${model_name}.pt`, constants);
+                    f.set(`data/sample_inputs/${model_name}.pt`, sample_inputs);
                 }
             }
-        } catch {
-            // continue regardless of error
+            const byteorder = await this._text('byteorder') || 'little';
+            f.set('byteorder', byteorder);
+        } else {
+            this.version = await this._text('version');
+            this.version = this.version.split('\n').shift().trim();
+            const weights = await this._fetch('serialized_state_dict.pt') || await this._fetch('serialized_state_dict.json');
+            const constants = await this._fetch('serialized_constants.pt') || await this._fetch('serialized_constants.json');
+            const sample_inputs = await this._fetch('serialized_example_inputs.pt');
+            f.set('models/model.json', this.exported_program);
+            f.set('data/weights/model.pt', weights);
+            f.set('data/constants/model.pt', constants);
+            f.set('data/sample_inputs/model.pt', sample_inputs);
+            exported_programs.set('', this.exported_program);
         }
-        const serialized_state_dict = await this._fetch('serialized_state_dict.pt') || await this._fetch('serialized_state_dict.json');
-        const serialized_constants = await this._fetch('serialized_constants.pt') || await this._fetch('serialized_constants.json');
-        const serialized_example_inputs = await this._fetch('serialized_example_inputs.pt');
-        const f = new Map();
-        f.set('serialized_exported_program.json', this.serialized_exported_program);
-        f.set('serialized_state_dict.pt', serialized_state_dict);
-        f.set('serialized_constants.pt', serialized_constants);
-        f.set('serialized_example_inputs.pt', serialized_example_inputs);
-        if (!this.version && this.serialized_exported_program) {
-            const version = this.serialized_exported_program.schema_version;
-            if (version && version.major && version.minor) {
-                this.version = `${version.major}.${version.minor}`;
+        if (!this.version) {
+            const versions = new Set();
+            for (const exported_program of exported_programs.values()) {
+                const schema_version = exported_program.schema_version;
+                if (schema_version && schema_version.major && schema_version.minor) {
+                    versions.add(`${schema_version.major}.${schema_version.minor}`);
+                }
+            }
+            if (versions.size === 1) {
+                this.version = versions.values().next().value;
             }
         }
         this.format = this.version ? `${this.format} v${this.version}` : this.format;
@@ -1436,23 +1465,28 @@ pytorch.Container.ExportedProgram = class extends pytorch.Container {
         }
         metadata.register(this.execution);
         const torch = this.execution.__import__('torch');
-        if (this.serialized_exported_program.graph_module.graph.constants) {
-            const zip = await import('./zip.js');
-            const constants = this.serialized_exported_program.graph_module.graph.constants;
-            for (const key of Object.keys(constants)) {
-                const value = constants[key];
-                const str = atob(value);
-                const buffer = new Uint8Array(str.length);
-                for (let i = 0; i < str.length; i++) {
-                    buffer[i] = str.charCodeAt(i);
+        for (const exported_program of exported_programs.values()) {
+            if (exported_program.graph_module.graph.constants) {
+                /* eslint-disable no-await-in-loop */
+                const zip = await import('./zip.js');
+                /* eslint-enable no-await-in-loop */
+                const constants = exported_program.graph_module.graph.constants;
+                for (const key of Object.keys(constants)) {
+                    const value = constants[key];
+                    const str = atob(value);
+                    const buffer = new Uint8Array(str.length);
+                    for (let i = 0; i < str.length; i++) {
+                        buffer[i] = str.charCodeAt(i);
+                    }
+                    const archive = zip.Archive.open(buffer);
+                    constants[key] = archive.entries;
                 }
-                const archive = zip.Archive.open(buffer);
-                constants[key] = archive.entries;
             }
         }
-        delete this.serialized_exported_program;
+        delete this.exported_program;
         delete this.context;
-        this.module = torch._export.load(f);
+        const pt2_contents = torch.export.pt2_archive._package.load_pt2(f);
+        this.modules = pt2_contents.exported_programs;
     }
 
     async _fetch(name) {
@@ -1465,6 +1499,21 @@ pytorch.Container.ExportedProgram = class extends pytorch.Container {
             // continue regardless of error
         }
         return null;
+    }
+
+    async _text(name) {
+        try {
+            const content = await this.context.fetch(name);
+            if (content) {
+                const reader = await content.read('text');
+                if (reader) {
+                    return reader.read();
+                }
+            }
+        } catch {
+            // continue regardless of error
+        }
+        return '';
     }
 };
 
@@ -1568,6 +1617,11 @@ pytorch.Execution = class extends python.Execution {
                 [this.weight, this.bias] = state;
             }
         });
+        this.registerType('__torch__.torch.classes.quantized.EmbeddingPackedParamsBase', class {
+            __setstate__(state) {
+                [this.version, this.tensors, this.doubles, this.longs] = state;
+            }
+        });
         this.registerType('__torch__.torch.classes.rnn.CellParamsBase', class {
             __setstate__(state) {
                 [this.type, this.tensors, this.doubles, this.longs, this.packed_params] = state;
@@ -1603,6 +1657,7 @@ pytorch.Execution = class extends python.Execution {
             { name: '__torch__.torch.classes.quantized.Conv2dPackedParamsBase', attributes: 'Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups', methods: ['unpack(__torch__.torch.classes.quantized.Conv2dPackedParamsBase self) -> ((Tensor, Tensor?))'] },
             { name: '__torch__.torch.classes.quantized.Conv3dPackedParamsBase', attributes: 'Tensor weight, Tensor bias, int[] stride, int[] padding, int[] dilation, int groups', methods: ['unpack(__torch__.torch.classes.quantized.Conv3dPackedParamsBase self) -> ((Tensor, Tensor?))'] },
             { name: '__torch__.torch.classes.quantized.LinearPackedParamsBase', attributes: 'Tensor weight, Tensor? bias' },
+            { name: '__torch__.torch.classes.quantized.EmbeddingPackedParamsBase', attributes: 'int version, Tensor[] tensors, float[] doubles, int[] longs', methods: [] },
             { name: '__torch__.torch.classes.rnn.CellParamsBase', attributes: 'str type, Tensor[] tensors, float[] doubles, int[] longs, __torch__.torch.classes.quantized.LinearPackedParamsBase[] packed_params' },
             { name: '__torch__.torch.classes.xnnpack.Conv2dOpContext', attributes: 'Tensor weight, Tensor? bias, int[] stride, int[] padding, int[] dilation, int groups, int[] output_min, int[] output_max' },
             { name: '__torch__.torch.classes.xnnpack.LinearOpContext', attributes: 'Tensor weight, Tensor bias, int[] output_min, int[] output_max' },
@@ -1820,6 +1875,7 @@ pytorch.Utility = class {
             case '__torch__.torch.classes.quantized.LinearPackedParamsBase':
             case '__torch__.torch.classes.quantized.Conv2dPackedParamsBase':
             case '__torch__.torch.classes.quantized.Conv3dPackedParamsBase':
+            case '__torch__.torch.classes.quantized.EmbeddingPackedParamsBase':
                 return true;
             default:
                 return false;

@@ -647,33 +647,32 @@ view.View = class {
             this._sidebar.close();
         }
         this.exception(error, false);
+        const repository = this._host.environment('repository');
         const knowns = [
-            { message: /^Invalid value identifier/, url: 'https://github.com/lutzroeder/netron/issues/540' },
-            { message: /^Cannot read property/, url: 'https://github.com/lutzroeder/netron/issues/647' },
-            { message: /^Duplicate value /, url: 'https://github.com/lutzroeder/netron/issues/1364' },
-            { message: /^EPERM: operation not permitted/, url: 'https://github.com/lutzroeder/netron/issues/551' },
-            { message: /^EACCES: permission denied/, url: 'https://github.com/lutzroeder/netron/issues/504' },
-            { message: /^Offset is outside the bounds of the DataView/, url: 'https://github.com/lutzroeder/netron/issues/563' },
-            { message: /^Invalid string length/, url: 'https://github.com/lutzroeder/netron/issues/648' },
-            { message: /^Unknown function /, url: 'https://github.com/lutzroeder/netron/issues/546' },
-            { message: /^Unsupported file content/, url: 'https://github.com/lutzroeder/netron/issues/550' },
-            { message: /^Unsupported Protocol Buffers content/, url: 'https://github.com/lutzroeder/netron/issues/593' },
-            { message: /^Unsupported Protocol Buffers text content/, url: 'https://github.com/lutzroeder/netron/issues/594' },
-            { message: /^Unsupported JSON content/, url: 'https://github.com/lutzroeder/netron/issues/595' },
-            { message: /^Invalid file content. File contains PaddlePaddle IR data./, url: 'https://github.com/lutzroeder/netron/issues/1384' },
-            { name: 'Error loading PyTorch model.', message: /^Unknown type name/, url: 'https://github.com/lutzroeder/netron/issues/969' },
-            { name: 'Error loading ONNX model.', message: /^File format is not onnx\.ModelProto \(Unexpected end of file\)\./, url: 'https://github.com/lutzroeder/netron/issues/1155' },
-            { name: 'Error loading ONNX model.', message: /^File format is not onnx\.ModelProto \(Cannot read properties of undefined \(reading 'ModelProto'\)\)\./, url: 'https://github.com/lutzroeder/netron/issues/1156' },
-            { name: 'Error loading ONNX model.', message: /^File format is not onnx\.ModelProto/, url: 'https://github.com/lutzroeder/netron/issues/549' }
+            { message: /^Invalid value identifier/, issue: '540' },
+            { message: /^Cannot read property/, issue: '647' },
+            { message: /^Duplicate value /, issue: '1364' },
+            { message: /^EPERM: operation not permitted/, issue: '551' },
+            { message: /^EACCES: permission denied/, issue: '504' },
+            { message: /^Offset is outside the bounds of the DataView/, issue: '563' },
+            { message: /^Invalid string length/, issue: '648' },
+            { message: /^Unknown function /, issue: '546' },
+            { message: /^Unsupported file content/, issue: '550' },
+            { message: /^Unsupported Protocol Buffers content/, issue: '593' },
+            { message: /^Unsupported Protocol Buffers text content/, issue: '594' },
+            { message: /^Unsupported JSON content/, issue: '595' },
+            { name: 'Error loading ONNX model.', message: /^File format is not onnx\.ModelProto \(Unexpected end of file\)\./, issue: '1155' },
+            { name: 'Error loading ONNX model.', message: /^File format is not onnx\.ModelProto \(Cannot read properties of undefined \(reading 'ModelProto'\)\)\./, issue: '1156' },
+            { name: 'Error loading ONNX model.', message: /^File format is not onnx\.ModelProto/, issue: '549' }
         ];
         const known = knowns.find((known) => (!known.name || known.name === error.name) && error.message.match(known.message));
-        const url = known && known.url ? known.url : null;
+        const url = known && known.issue ? `${repository}/issues/${known.issue}` : `${repository}/issues`;
         const message = error.message;
         name = name || error.name;
-        const report = url ? true : false;
+        const report = !message.startsWith('Invalid file content.') && this.host.environment('packaged');
         await this._host.message(message, true, report ? 'Report' : 'OK');
         if (report) {
-            this._host.openURL(url || `${this._host.environment('repository')}/issues`);
+            this._host.openURL(url);
         }
         this.show(screen);
     }
@@ -819,10 +818,13 @@ view.View = class {
                     }
                     if (name.length > 24) {
                         element.setAttribute('title', name);
-                        element.innerHTML = `&hellip;${name.substring(name.length - 24, name.length)}`;
+                        const truncated = name.substring(name.length - 24, name.length);
+                        element.innerHTML = '&hellip;';
+                        const text = document.createTextNode(truncated);
+                        element.appendChild(text);
                     } else {
                         element.removeAttribute('title');
-                        element.innerHTML = name;
+                        element.textContent = name;
                     }
                     path.appendChild(element);
                 }
@@ -2791,7 +2793,11 @@ view.ObjectSidebar = class extends view.Control {
     error(error, fatal) {
         super.error(error, fatal);
         const element = this.createElement('span');
-        element.innerHTML = `<b>ERROR:</b> ${error.message}`;
+        const title = document.createElement('b');
+        title.textContent = 'ERROR: ';
+        element.appendChild(title);
+        const message = document.createTextNode(` ${error.message}`);
+        element.appendChild(message);
         this.element.appendChild(element);
     }
 };
@@ -3071,14 +3077,14 @@ view.PrimitiveView = class extends view.Expander {
             switch (type) {
                 case 'graph': {
                     const line = this.createElement('div', 'sidebar-item-value-line-link');
-                    line.innerHTML = value.name || '&nbsp;';
+                    line.textContent = value.name || '\u00A0';
                     line.addEventListener('click', () => this.emit('activate', value));
                     this.add(line);
                     break;
                 }
                 case 'function': {
                     const line = this.createElement('div', 'sidebar-item-value-line-link');
-                    line.innerHTML = value.type.name;
+                    line.textContent = value.type.name;
                     line.addEventListener('click', () => this.emit('activate', value));
                     this.add(line);
                     break;
@@ -3086,7 +3092,7 @@ view.PrimitiveView = class extends view.Expander {
                 case 'object[]': {
                     for (const obj of argument.value) {
                         const line = this.createElement('div', 'sidebar-item-value-line');
-                        line.innerHTML = obj.type.name;
+                        line.textContent = obj.type ? obj.type.name : '?';
                         this.add(line);
                     }
                     break;
@@ -3384,7 +3390,11 @@ view.TensorView = class extends view.Expander {
     error(error, fatal) {
         super.error(error, fatal);
         const element = this.createElement('div', 'sidebar-item-value-line');
-        element.innerHTML = `<b>ERROR:</b> ${error.message}`;
+        const title = document.createElement('b');
+        title.textContent = 'ERROR: ';
+        element.appendChild(title);
+        const message = document.createTextNode(error.message);
+        element.appendChild(message);
         this.element.appendChild(element);
     }
 
@@ -3898,7 +3908,11 @@ view.DocumentationSidebar = class extends view.Control {
     error(error, fatal) {
         super.error(error, fatal);
         const element = this.createElement('span');
-        element.innerHTML = `<b>ERROR:</b> ${error.message}`;
+        const title = document.createElement('b');
+        title.textContent = 'ERROR: ';
+        element.appendChild(title);
+        const message = document.createTextNode(error.message);
+        element.appendChild(message);
         this.element.appendChild(element);
     }
 };
@@ -4210,7 +4224,11 @@ view.FindSidebar = class extends view.Control {
     error(error, fatal) {
         super.error(error, fatal);
         const element = this.createElement('li');
-        element.innerHTML = `<b>ERROR:</b> ${error.message}`;
+        const title = document.createElement('b');
+        title.textContent = 'ERROR: ';
+        element.appendChild(title);
+        const message = document.createTextNode(` ${error.message}`);
+        element.appendChild(message);
         this._content.appendChild(element);
     }
 };
@@ -5619,6 +5637,13 @@ view.Context = class {
         return this._stream;
     }
 
+    get container() {
+        if (this._context instanceof view.EntryContext) {
+            return this._context;
+        }
+        return null;
+    }
+
     async request(file) {
         return this._context.request(file, 'utf-8', null);
     }
@@ -6079,6 +6104,10 @@ view.EntryContext = class {
         return this._host.require(id);
     }
 
+    get entries() {
+        return this._entries;
+    }
+
     error(error, fatal) {
         this._host.exception(error, fatal);
     }
@@ -6100,7 +6129,7 @@ view.ModelFactoryService = class {
         this._factories = [];
         /* eslint-disable no-control-regex */
         this.register('./message', ['.message', '.netron', '.maxviz']);
-        this.register('./pytorch', ['.pt', '.pth', '.ptl', '.pt1', '.pt2', '.pyt', '.pyth', '.pkl', '.pickle', '.h5', '.t7', '.model', '.dms', '.tar', '.ckpt', '.chkpt', '.tckpt', '.bin', '.pb', '.zip', '.nn', '.torchmodel', '.torchscript', '.pytorch', '.ot', '.params', '.trt', '.ff', '.ptmf', '.jit', '.bin.index.json', 'model.json', '.ir', 'serialized_exported_program.json', 'serialized_state_dict.json'], ['.model', '.pt2'], [/^\x80.\x8a\x0a\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19/]);
+        this.register('./pytorch', ['.pt', '.pth', '.ptl', '.pt1', '.pt2', '.pyt', '.pyth', '.pkl', '.pickle', '.h5', '.t7', '.model', '.dms', '.tar', '.ckpt', '.chkpt', '.tckpt', '.bin', '.pb', '.zip', '.nn', '.torchmodel', '.torchscript', '.pytorch', '.ot', '.params', '.trt', '.ff', '.ptmf', '.jit', '.bin.index.json', 'model.json', '.ir', 'serialized_exported_program.json', 'serialized_state_dict.json', 'archive_format'], ['.model', '.pt2'], [/^\x80.\x8a\x0a\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19/]);
         this.register('./onnx', ['.onnx', '.onnx.data', '.onn', '.pb', '.onnxtxt', '.pbtxt', '.prototxt', '.txt', '.model', '.pt', '.pth', '.pkl', '.ort', '.ort.onnx', '.ngf', '.json', '.bin', 'onnxmodel'], [], [/^\x08[\x00-\x10]\x12[\x00-\x20]\w\w/, /^\x08[\x00-\x10]\x12\x00\x1A/, /^\x08[\x00-\x10]\x3A/, /^\s*ir_version:\s\d+/, /^....ORTM/]);
         this.register('./tflite', ['.tflite', '.lite', '.tfl', '.bin', '.pb', '.tmfile', '.h5', '.model', '.json', '.txt', '.dat', '.nb', '.ckpt', '.onnx'], [], [/^....TFL3/]);
         this.register('./mxnet', ['.json', '.params'], ['.mar']);
@@ -6212,7 +6241,27 @@ view.ModelFactoryService = class {
             }
             return model;
         } catch (error) {
-            error.context = !error.context && context && context.identifier ? context.identifier : error.context || '';
+            if (!error.context && context) {
+                error.context = context.identifier || '';
+                const stream = context.stream;
+                if (stream) {
+                    try {
+                        const hex = (buffer) => Array.from(buffer).map((c) => (c < 16 ? '0' : '') + c.toString(16)).join('');
+                        const position = stream.position;
+                        stream.seek(0);
+                        const head = stream.peek(Math.min(16, stream.length));
+                        error.context += `|${hex(head)}`;
+                        if (stream.length > 16) {
+                            stream.seek(stream.length - 16);
+                            const tail = stream.peek(16);
+                            error.context += `|${hex(tail)}`;
+                        }
+                        stream.seek(position);
+                    } catch {
+                        // continue regardless of error
+                    }
+                }
+            }
             throw error;
         }
     }
@@ -6360,8 +6409,8 @@ view.ModelFactoryService = class {
             const tags = await context.tags('pb+');
             if (Object.keys(tags).length > 0) {
                 const formats = [
-                    { name: 'sentencepiece.ModelProto data', tags: [[1,[[1,2],[2,5],[3,0]]],[2,[[1,2],[2,2],[3,0],[4,0],[5,2],[6,0],[7,2],[10,5],[16,0],[40,0],[41,0],[42,0],[43,0]]],[3,[]],[4,[]],[5,[]]] },
-                    { name: 'mediapipe.BoxDetectorIndex data', tags: [[1,[[1,[[1,[[1,5],[2,5],[3,5],[4,5],[6,0],[7,5],[8,5],[10,5],[11,0],[12,0]]],[2,5],[3,[]]]],[2,false],[3,false],[4,false],[5,false]]],[2,false],[3,false]] },
+                    { name: 'sentencepiece.ModelProto data', tags: [[1,[[1,2],[2,5],[3,0]]],[2,[[1,2],[2,2],[3,0],[4,0],[5,2],[6,0],[7,2],[10,5],[16,0],[40,0],[41,0],[42,0],[43,0]]],[3,[]],[4,[]],[5,[]]] }, // https://github.com/google/sentencepiece/blob/master/src/sentencepiece_model.proto
+                    { name: 'mediapipe.BoxDetectorIndex data', tags: [[1,[[1,[[1,[[1,5],[2,5],[3,5],[4,5],[6,0],[7,5],[8,5],[10,5],[11,0],[12,0]]],[2,5],[3,[]]]],[2,false],[3,false],[4,false],[5,false]]],[2,false],[3,false]] }, // https://github.com/google-ai-edge/mediapipe/blob/2b5a50fff37f79db8103dbd88f552c1a9be31e51/mediapipe/util/tracking/box_detector.proto
                     { name: 'third_party.tensorflow.python.keras.protobuf.SavedMetadata data', tags: [[1,[[1,[[1,0],[2,0]]],[2,0],[3,2],[4,2],[5,2]]]] },
                     { name: 'pblczero.Net data', tags: [[1,5],[2,2],[3,[[1,0],[2,0],[3,0]],[10,[[1,[]],[2,[]],[3,[]],[4,[]],[5,[]],[6,[]]]],[11,[]]]] }, // https://github.com/LeelaChessZero/lczero-common/blob/master/proto/net.proto
                     { name: 'chrome_browser_media.PreloadedData', tags: [[1,2]], identifier: 'preloaded_data.pb' }, // https://github.com/kiwibrowser/src/blob/86afd150b847c9dd6f9ad3faddee1a28b8c9b23b/chrome/browser/media/media_engagement_preload.proto#L9
@@ -6369,8 +6418,7 @@ view.ModelFactoryService = class {
                     { name: 'mindspore.irpb.Checkpoint', tags: [[1,[[1,2],[2,[[1,0],[2,2],[3,2]]]]]] }, // https://github.com/mindspore-ai/mindspore/blob/master/mindspore/ccsrc/utils/checkpoint.proto
                     { name: 'optimization_guide.proto.PageTopicsOverrideList data', tags: [[1,[[1,2],[2,[]]]]] }, // https://github.com/chromium/chromium/blob/main/components/optimization_guide/proto/page_topics_override_list.proto
                     { name: 'optimization_guide.proto.ModelInfo data', tags: [[1,0],[2,0],[4,0],[6,false],[7,[]],[9,0]] }, // https://github.com/chromium/chromium/blob/22b0d711657b451b61d50dd2e242b3c6e38e6ef5/components/optimization_guide/proto/models.proto#L80
-                    // { name: 'Hobot Dnn data', tags: [[1,0],[2,0],[4,[[1,2],[2,2]]]] }, // https://github.com/HorizonRDK/hobot_dnn
-                    // { name: 'Hobot Dnn data', tags: [[1,0],[2,0],[6,[1,[[1,2],[2,2]]]]] }, // https://github.com/HorizonRDK/hobot_dnn
+                    { name: 'Horizon binary model', tags: [[1,0],[2,0],[5,[[7,2],[8,2]]],[6,[[1,[[1,2],[2,2]]]]]] }, // https://github.com/HorizonRDK/hobot_dnn
                 ];
                 const match = (tags, schema) => {
                     for (const [key, inner] of schema) {
@@ -6492,10 +6540,7 @@ view.ModelFactoryService = class {
         };
         const unknown = async () => {
             if (stream) {
-                stream.seek(0);
-                const buffer = stream.peek(Math.min(16, stream.length));
-                const content = Array.from(buffer).map((c) => (c < 16 ? '0' : '') + c.toString(16)).join('');
-                throw new view.Error(`Unsupported file content '${content}'.`);
+                throw new view.Error(`Unsupported file content.`);
             }
             throw new view.Error("Unsupported file directory.");
         };
@@ -6680,46 +6725,47 @@ view.ModelFactoryService = class {
             }
             /* eslint-disable no-control-regex */
             const entries = [
-                { name: 'ELF executable', value: /^\x7FELF/ },
-                { name: 'PNG image', value: /^\x89PNG/ },
-                { name: 'Git LFS header', value: /^version https:\/\/git-lfs.github.com/ },
-                { name: 'Git LFS header', value: /^\s*oid sha256:/ },
-                { name: 'GGML data', value: /^lmgg|fmgg|tjgg|algg|fugg/ },
-                { name: 'HTML markup', value: /^\s*<(html|HTML)(\s+[^>]+)?>/ },
-                { name: 'HTML markup', value: /^\s*<!(doctype|DOCTYPE)\s*(html|HTML)>/ },
-                { name: 'HTML markup', value: /^\s*<!DOCTYPE\s*HTML\s+(PUBLIC|SYSTEM)?/ },
-                { name: 'Unity metadata', value: /^fileFormatVersion:/ },
-                { name: 'Python source code', value: /^((#.*(\n|\r\n))|('''.*'''(\n|\r\n))|("""[\s\S]*""")|(\n|\r\n))*(import[ ]+[a-zA-Z_]\w*(\.[a-zA-Z_]\w*)*([ ]+as[ ]+[a-zA-Z]\w*)?[ ]*(,|;|\n|\r\n))/ },
-                { name: 'Python source code', value: /^((#.*(\n|\r\n))|('''.*'''(\n|\r\n))|("""[\s\S]*""")|(\n|\r\n))*(from[ ]+([a-zA-Z_]\w*(\.[a-zA-Z_]\w*)*)[ ]+import[ ]+[a-zA-Z]\w*)/ },
-                { name: 'Python virtual environment configuration', value: /^home[ ]*=[ ]*/, identifier: /^pyvenv\.cfg/ },
-                { name: 'Bash script', value: /^(#!\/usr\/bin\/env|#!\/bin\/bash)\s/ },
-                { name: 'TSD header', value: /^%TSD-Header-###%/ },
-                { name: 'AppleDouble data', value: /^\x00\x05\x16\x07/ },
-                { name: 'TensorFlow Hub module', value: /^\x08\x03$/, identifier: /^tfhub_module\.pb/ },
-                { name: 'V8 snapshot', value: /^.\x00\x00\x00.\x00\x00\x00/, identifier: /^snapshot_blob\.bin/ },
-                { name: 'V8 context snapshot', value: /^.\x00\x00\x00.\x00\x00\x00/, identifier: /^v8_context_snapshot\.bin/ },
-                { name: 'V8 natives blob', value: /^./, identifier: /^natives_blob\.bin/ },
-                { name: 'ViSQOL model', value: /^svm_type\s/ },
-                { name: 'SenseTime model', value: /^STEF/ },
                 { name: 'AES Crypt data', value: /^AES[\x01|\x02]\x00/ },
-                { name: 'BModel data', value: /^\xEE\xAA\x55\xFF/ }, // https://github.com/sophgo/tpu-mlir/blob/master/include/tpu_mlir/Builder/BM168x/bmodel.fbs
-                { name: 'CviModel data', value: /^CviModel/ }, // https://github.com/sophgo/tpu-mlir/blob/master/include/tpu_mlir/Builder/CV18xx/proto/cvimodel.fbs
-                { name: 'Tokenizer data', value: /^IQ== 0\n/ },
-                { name: 'BCNN model', value: /^BCNN/ },
+                { name: 'AppleDouble data', value: /^\x00\x05\x16\x07/ },
                 { name: 'base64 data', value: /^gAAAAAB/ },
-                { name: 'Mathematica Notebook data', value: /^\(\*\sContent-type:\sapplication\/vnd\.wolfram\.mathematica\s\*\)/ },
-                { name: 'llama2.c checkpoint', value: /^..\x00\x00..\x00\x00..\x00\x00..\x00\x00..\x00\x00..\x00\x00..\x00\x00/, identifier: /^stories\d+[KM]\.bin/ },
+                { name: 'Bash script', value: /^(#!\/usr\/bin\/env|#!\/bin\/bash)\s/ },
+                { name: 'BCNN model', value: /^BCNN/ },
+                { name: 'BModel data', value: /^\xEE\xAA\x55\xFF/ }, // https://github.com/sophgo/tpu-mlir/blob/master/include/tpu_mlir/Builder/BM168x/bmodel.fbs
                 { name: 'Cambricon model', value: /^\x7fMEF/ },
                 { name: 'Cambricon model', value: /^cambricon_offline/ },
-                { name: 'VNN model', value: /^\x2F\x4E\x00\x00.\x00\x00\x00/, identifier: /.vnnmodel$/ },
-                { name: 'SQLite data', value: /^SQLite format/ },
-                { name: 'Optimium model', value: /^EZMODEL/ }, // https://github.com/EZ-Optimium/Optimium,
-                { name: 'undocumented NNC data', value: /^(\xC0|\xBC)\x0F\x00\x00ENNC/ },
-                { name: 'undocumented HALCON model', value: /^HDLMODEL/ },
-                { name: 'Rich Text Format data', value: /^{\\rtf/ },
+                { name: 'CviModel data', value: /^CviModel/ }, // https://github.com/sophgo/tpu-mlir/blob/master/include/tpu_mlir/Builder/CV18xx/proto/cvimodel.fbs
+                { name: 'ELF executable', value: /^\x7FELF/ },
                 { name: 'Encrypted File data', value: /^ENCRYPTED_FILE|EV_ENCRYPTED/ },
+                { name: 'GGML data', value: /^lmgg|fmgg|tjgg|algg|fugg/ },
+                { name: 'Git LFS header', value: /^\s*oid sha256:/ },
+                { name: 'Git LFS header', value: /^version https:\/\/git-lfs.github.com/ },
+                { name: 'HTML markup', value: /^\s*<!(doctype|DOCTYPE)\s*(html|HTML)>/ },
+                { name: 'HTML markup', value: /^\s*<!DOCTYPE\s*HTML\s+(PUBLIC|SYSTEM)?/ },
+                { name: 'HTML markup', value: /^\s*<(html|HTML)(\s+[^>]+)?>/ },
                 { name: 'Keras Tokenizer data', value: /^"{\\"class_name\\":\s*\\"Tokenizer\\"/ },
+                { name: 'llama2.c checkpoint', value: /^..\x00\x00..\x00\x00..\x00\x00..\x00\x00..\x00\x00..\x00\x00..\x00\x00/, identifier: /^stories\d+[KM]\.bin/ },
+                { name: 'Mathematica Notebook data', value: /^\(\*\sContent-type:\sapplication\/vnd\.wolfram\.mathematica\s\*\)/ },
                 { name: 'obfuscated data', value: /^obfs/ },
+                { name: 'Optimium model', value: /^EZMODEL/ }, // https://github.com/EZ-Optimium/Optimium,
+                { name: 'PNG image', value: /^\x89PNG/ },
+                { name: 'Python source code', value: /^((#.*(\n|\r\n))|('''.*'''(\n|\r\n))|("""[\s\S]*""")|(\n|\r\n))*(from[ ]+([a-zA-Z_]\w*(\.[a-zA-Z_]\w*)*)[ ]+import[ ]+[a-zA-Z]\w*)/ },
+                { name: 'Python source code', value: /^((#.*(\n|\r\n))|('''.*'''(\n|\r\n))|("""[\s\S]*""")|(\n|\r\n))*(import[ ]+[a-zA-Z_]\w*(\.[a-zA-Z_]\w*)*([ ]+as[ ]+[a-zA-Z]\w*)?[ ]*(,|;|\n|\r\n))/ },
+                { name: 'Python virtual environment configuration', value: /^home[ ]*=[ ]*/, identifier: /^pyvenv\.cfg/ },
+                { name: 'Rich Text Format data', value: /^{\\rtf/ },
+                { name: 'SenseTime model', value: /^STEF/ },
+                { name: 'SQLite data', value: /^SQLite format/ },
+                { name: 'TensorFlow Hub module', value: /^\x08\x03$/, identifier: /^tfhub_module\.pb/ },
+                { name: 'Tokenizer data', value: /^IQ== 0\n/ },
+                { name: 'TSD header', value: /^%TSD-Header-###%/ },
+                { name: 'undocumented HALCON model', value: /^HDLMODEL/ },
+                { name: 'undocumented license data', value: /^This model and the software may not be used or distributed in any manner except as authorized under a valid written agreemen/ },
+                { name: 'undocumented NNC data', value: /^(\xC0|\xBC)\x0F\x00\x00ENNC/ },
+                { name: 'Unity metadata', value: /^fileFormatVersion:/ },
+                { name: 'V8 context snapshot', value: /^.\x00\x00\x00.\x00\x00\x00/, identifier: /^v8_context_snapshot\.bin/ },
+                { name: 'V8 natives blob', value: /^./, identifier: /^natives_blob\.bin/ },
+                { name: 'V8 snapshot', value: /^.\x00\x00\x00.\x00\x00\x00/, identifier: /^snapshot_blob\.bin/ },
+                { name: 'ViSQOL model', value: /^svm_type\s/ },
+                { name: 'VNN model', value: /^\x2F\x4E\x00\x00.\x00\x00\x00/, identifier: /.vnnmodel$/ },
             ];
             /* eslint-enable no-control-regex */
             const buffer = stream.peek(Math.min(4096, stream.length));
