@@ -100,7 +100,7 @@ export function activate(context: vscode.ExtensionContext) {
 					case 'request_model':
 						panel.webview.postMessage({
 							command: "transmit_model", 
-							value: Uint8Array.from(Buffer.from(fs.readFileSync(modelFile!)))});
+							value: Uint8Array.from(fs.readFileSync(modelFile!)).subarray()});
 						return;
 				  }
 				},
