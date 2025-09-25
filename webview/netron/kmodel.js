@@ -24,7 +24,7 @@ kmodel.Model = class {
 
     constructor(model) {
         this.format = `kmodel v${model.version}`;
-        this.graphs = model.modules.map((module) => new kmodel.Graph(module));
+        this.modules = model.modules.map((module) => new kmodel.Graph(module));
     }
 };
 
@@ -252,7 +252,7 @@ kmodel.Reader = class {
     }
 
     read() {
-        if (this.version < 3 || this.version > 5) {
+        if (this.version < 3 || this.version > 7) {
             throw new kmodel.Error(`Unsupported model version '${this.version}'.`);
         }
         const types = new Map();

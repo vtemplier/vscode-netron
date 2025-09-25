@@ -95,8 +95,8 @@ openvino.ModelFactory = class {
         return null;
     }
 
-    filter(context, type) {
-        return context.type !== 'openvino.xml' || type !== 'openvino.bin';
+    filter(context, match) {
+        return context.type !== 'openvino.xml' || match.type !== 'openvino.bin';
     }
 
     async open(context) {
@@ -230,7 +230,7 @@ openvino.Model = class {
 
     constructor(metadata, net, bin) {
         this.name = net.name || '';
-        this.graphs = [new openvino.Graph(metadata, net, bin)];
+        this.modules = [new openvino.Graph(metadata, net, bin)];
         this.format = 'OpenVINO IR';
     }
 };

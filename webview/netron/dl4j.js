@@ -22,8 +22,8 @@ dl4j.ModelFactory = class {
         return null;
     }
 
-    filter(context, type) {
-        return context.type !== 'dl4j.configuration' || (type !== 'dl4j.coefficients' && type !== 'openvino.bin');
+    filter(context, match) {
+        return context.type !== 'dl4j.configuration' || (match.type !== 'dl4j.coefficients' && match.type !== 'openvino.bin');
     }
 
     async open(context) {
@@ -56,7 +56,7 @@ dl4j.Model = class {
 
     constructor(metadata, configuration, coefficients) {
         this.format = 'Deeplearning4j';
-        this.graphs = [new dl4j.Graph(metadata, configuration, coefficients)];
+        this.modules = [new dl4j.Graph(metadata, configuration, coefficients)];
     }
 };
 
@@ -133,7 +133,10 @@ dl4j.Graph = class {
                 this.nodes.push(node);
                 inputs = [layer.layerName];
             }
-            this.outputs.push(new dl4j.Argument('output', [values.map(inputs[0])]));
+            if (inputs && inputs.length > 0) {
+                const argument = new dl4j.Argument('output', [values.map(inputs[0])]);
+                this.outputs.push(argument);
+            }
         }
     }
 };
@@ -372,7 +375,7 @@ dl4j.NDArray = class {
             ['DOUBLE', ['float64', 8]]
         ]);
         if (!dataTypes.has(headerData[2])) {
-            throw new dl4j.Error(`Unsupported header data type '${headerShape[2]}'.`);
+            throw new dl4j.Error(`Unsupported header data type '${headerData[2]}'.`);
         }
         const [dataType, itemSize] = dataTypes.get(headerData[2]);
         this.dataType = dataType;

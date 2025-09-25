@@ -46,11 +46,11 @@ paddle.ModelFactory = class {
         return null;
     }
 
-    filter(context, type) {
-        if (context.type === 'paddle.pb' && (type === 'paddle.params' || type === 'paddle.pickle')) {
+    filter(context, match) {
+        if (context.type === 'paddle.pb' && (match.type === 'paddle.params' || match.type === 'paddle.pickle')) {
             return false;
         }
-        if (context.type === 'paddle.naive.model' && type === 'paddle.naive.param') {
+        if (context.type === 'paddle.naive.model' && match.type === 'paddle.naive.param') {
             return false;
         }
         return true;
@@ -284,7 +284,7 @@ paddle.Model = class {
     constructor(metadata, format, desc, tensors) {
         desc = desc && Array.isArray(desc.blocks) ? desc : { blocks: [null] };
         this.format = format;
-        this.graphs = desc.blocks.map((block) => new paddle.Graph(metadata, block, tensors));
+        this.modules = desc.blocks.map((block) => new paddle.Graph(metadata, block, tensors));
     }
 };
 
@@ -781,7 +781,7 @@ paddle.NaiveBuffer = class {
         const decoder = new TextDecoder('utf-8');
         const opt_version = reader.read(16);
         const version = decoder.decode(opt_version.slice(0, opt_version.indexOf(0x00)));
-        this.format = `Paddle Lite${version && version.match(/^v\d+\.\d+.\d+$/) ? ` ${version}` : ''}`;
+        this.format = `Paddle Lite${version && version.match(/^v\d+\.\d+\.\d+$/) ? ` ${version}` : ''}`;
         const topo_size = reader.uint64().toNumber();
         const openProgramDesc = (buffer) => {
             const reader = flatbuffers.BinaryReader.open(buffer);

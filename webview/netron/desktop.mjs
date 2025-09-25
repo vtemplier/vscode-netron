@@ -1,5 +1,6 @@
 
 import * as base from './base.js';
+import * as child_process from 'child_process';
 import * as electron from 'electron';
 import * as fs from 'fs';
 import * as http from 'http';
@@ -39,20 +40,37 @@ desktop.Host = class {
         });
         this._environment = electron.ipcRenderer.sendSync('get-environment', {});
         this._environment.menu = this._environment.titlebar && this._environment.platform !== 'darwin';
-        this._element('menu-button').style.opacity = 0;
         this._files = [];
-        if (!/^\d\.\d\.\d$/.test(this.version)) {
+        electron.ipcRenderer.on('open', (sender, data) => {
+            this._open(data);
+        });
+        this._element('menu-button').style.opacity = 0;
+        if (!/^\d+\.\d+\.\d+$/.test(this.version)) {
             throw new Error('Invalid version.');
         }
         const metadata = [];
         metadata.push(os.arch());
-        if (process.env.APPIMAGE) {
-            metadata.push('appimage');
-        } else if (process.env.SNAP) {
-            metadata.push('snap');
-        } else {
-            metadata.push('');
+        let packager = '';
+        if (process.platform === 'linux') {
+            if (process.env.APPIMAGE) {
+                packager = 'appimage';
+            } else if (process.env.SNAP) {
+                packager = 'snap';
+            } else {
+                try {
+                    child_process.execFileSync('dpkg', ['-S', process.execPath]);
+                    packager = 'deb';
+                } catch {
+                    try {
+                        child_process.execFileSync("rpm", ["-qf", process.execPath]);
+                        packager = 'rpm';
+                    } catch {
+                        // continue regardless of error
+                    }
+                }
+            }
         }
+        metadata.push(packager);
         this._metadata = metadata.join('|');
     }
 
@@ -78,9 +96,18 @@ desktop.Host = class {
 
     async view(view) {
         this._view = view;
-        electron.ipcRenderer.on('open', (sender, data) => {
-            this._open(data);
-        });
+        if (process.env.SNAP) {
+            this.document.body.classList.remove('spinner');
+            await this.message('Please migrate as Snap support is being discontinued.', null, 'Migrate');
+            this.openURL('https://github.com/lutzroeder/netron/issues/1500');
+            this.document.body.classList.add('spinner');
+        }
+        if (process.env.APPIMAGE) {
+            this.document.body.classList.remove('spinner');
+            await this.message('Please migrate as AppImage support is being discontinued.', null, 'Migrate');
+            this.openURL('https://github.com/lutzroeder/netron/issues/1500');
+            this.document.body.classList.add('spinner');
+        }
         const age = async () => {
             const days = (new Date() - new Date(this._environment.date)) / (24 * 60 * 60 * 1000);
             if (days > 180) {
@@ -193,7 +220,7 @@ desktop.Host = class {
         electron.ipcRenderer.on('zoom-out', () => {
             this._element('zoom-out-button').click();
         });
-        electron.ipcRenderer.on('reset-zoom', () => {
+        electron.ipcRenderer.on('zoom-reset', () => {
             this._view.resetZoom();
         });
         electron.ipcRenderer.on('show-properties', () => {
@@ -216,8 +243,8 @@ desktop.Host = class {
         });
         electron.ipcRenderer.on('window-state', (sender, data) => {
             if (this._environment.titlebar) {
-                this._element('graph').style.marginTop = '32px';
-                this._element('graph').style.height = 'calc(100% - 32px)';
+                this._element('target').style.marginTop = '32px';
+                this._element('target').style.height = 'calc(100% - 32px)';
                 this._element('sidebar-title').style.marginTop = '24px';
                 this._element('sidebar-closebutton').style.marginTop = '24px';
                 this._element('titlebar').classList.add('titlebar-visible');

@@ -1237,7 +1237,10 @@ vkgraph.VkDataType = {
     INT8: 2,
     INT32: 3,
     FLOAT16: 4,
-    FLOAT32: 5
+    FLOAT32: 5,
+    FLOAT64: 6,
+    INT64: 7,
+    UNSET: 127
 };
 
 vkgraph.VkStorageType = {
@@ -1264,6 +1267,7 @@ vkgraph.VkTensor = class VkTensor {
         $.mem_obj_id = reader.int32_(position, 10, 0);
         $.storage_type = reader.uint8_(position, 12, 255);
         $.memory_layout = reader.uint8_(position, 14, 255);
+        $.staging_datatype = reader.int8_(position, 16, 127);
         return $;
     }
 };
@@ -1392,6 +1396,7 @@ vkgraph.VkBytes = class VkBytes {
         const $ = new vkgraph.VkBytes();
         $.offset = reader.uint64_(position, 4, 0n);
         $.length = reader.uint64_(position, 6, 0n);
+        $.named_key = reader.string_(position, 8, null);
         return $;
     }
 };

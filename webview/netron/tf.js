@@ -233,11 +233,11 @@ tf.ModelFactory = class {
         return null;
     }
 
-    filter(context, type) {
-        if (context.type === 'tf.bundle' && type === 'tf.data') {
+    filter(context, match) {
+        if (context.type === 'tf.bundle' && match.type === 'tf.data') {
             return false;
         }
-        if ((context.type === 'tf.json' || context.type === 'tf.json.gz') && type === 'tf.tfjs.weights') {
+        if ((context.type === 'tf.json' || context.type === 'tf.json.gz') && match.type === 'tf.tfjs.weights') {
             return false;
         }
         return true;
@@ -702,7 +702,7 @@ tf.Model = class {
     constructor(metadata, model, format, producer, bundle) {
         this.format = format;
         this.producer = producer || '';
-        this.graphs = [];
+        this.modules = [];
         if (model) {
             for (let i = 0; i < model.meta_graphs.length; i++) {
                 const meta_graph = model.meta_graphs[i];
@@ -713,11 +713,11 @@ tf.Model = class {
                     name = i.toString();
                 }
                 const graph = new tf.Graph(metadata, meta_graph, name, bundle);
-                this.graphs.push(graph);
+                this.modules.push(graph);
             }
         } else {
             const graph = new tf.Graph(metadata, null, '', bundle);
-            this.graphs.push(graph);
+            this.modules.push(graph);
         }
     }
 };

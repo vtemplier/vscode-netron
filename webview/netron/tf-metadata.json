@@ -13575,6 +13575,7 @@
       {
         "name": "select_cols",
         "type": "int64[]",
+        "description": "Optional sorted list of column indices to select. If specified,\nonly this subset of columns will be parsed and returned.\nIt only works on `records` except for `record_defaults`.",
         "default": []
       }
     ],
@@ -18320,7 +18321,7 @@
       {
         "name": "uniform_noise",
         "type": "boolean",
-        "description": "indicates if the noise should be generated using a\nuniform distribution or a Gaussian distribution.",
+        "description": "indicates if the noise should be generated using a\nuniform distribution or a Gaussian distribution.\nIt should not be `True` when `noise` is not `uniform`.",
         "default": true
       },
       {
@@ -18375,7 +18376,7 @@
       {
         "name": "uniform_noise",
         "type": "boolean",
-        "description": "indicates if the noise should be generated using a\nuniform distribution or a Gaussian distribution.",
+        "description": "indicates if the noise should be generated using a\nuniform distribution or a Gaussian distribution.\nIt should not be `True` when `noise` is not `uniform`.",
         "default": true
       },
       {
@@ -60494,6 +60495,15 @@
       {
         "name": "element_dtype",
         "type": "type"
+      },
+      {
+        "name": "Tshape",
+        "type": "type",
+        "description": "Must be one of the following: `int32`, `int64`.",
+        "default": {
+          "type": "type",
+          "value": 3
+        }
       }
     ],
     "inputs": [
@@ -60507,7 +60517,7 @@
       },
       {
         "name": "element_shape",
-        "type": 3
+        "typeAttr": "Tshape"
       }
     ],
     "outputs": [

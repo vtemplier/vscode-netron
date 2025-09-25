@@ -20,7 +20,7 @@ view.View = class {
         };
         this._options = { ...this._defaultOptions };
         this._model = null;
-        this._stack = [];
+        this._path = [];
         this._selection = [];
         this._sidebar = new view.Sidebar(this._host);
         this._find = null;
@@ -38,8 +38,8 @@ view.View = class {
             for (const [name, value] of Object.entries(options)) {
                 this._options[name] = value;
             }
-            this._element('sidebar-document-button').addEventListener('click', () => {
-                this.showDocumentProperties();
+            this._element('sidebar-model-button').addEventListener('click', () => {
+                this.showModelProperties();
             });
             this._element('sidebar-target-button').addEventListener('click', () => {
                 this.showTargetProperties();
@@ -57,18 +57,18 @@ view.View = class {
                 if (e.shiftKey || e.ctrlKey) {
                     e.preventDefault();
                 }
-            }, { passive: true });
+            }, { passive: false });
             this._host.document.addEventListener('keydown', () => {
-                if (this._graph) {
-                    this._graph.select(null);
+                if (this._target) {
+                    this._target.select(null);
                 }
             });
             if (this._host.type === 'Electron') {
-                this._host.update({ 'can-copy': false });
+                this._host.update({ 'copy.enabled': false });
                 this._host.document.addEventListener('selectionchange', () => {
                     const selection = this._host.document.getSelection();
                     const selected = selection.rangeCount === 0 || selection.toString().trim() !== '';
-                    this._host.update({ 'can-copy': selected });
+                    this._host.update({ 'copy.enabled': selected });
                 });
             }
             const platform = this._host.environment('platform');
@@ -82,7 +82,9 @@ view.View = class {
                 execute: async () => await this.popTarget()
             });
             if (this._host.environment('menu')) {
-                this._menu.attach(this._element('menu'), this._element('menu-button'));
+                const menu = this._element('menu');
+                const button = this._element('menu-button');
+                this._menu.attach(menu, button);
                 const file = this._menu.group('&File');
                 file.add({
                     label: '&Open...',
@@ -173,19 +175,19 @@ view.View = class {
                     label: 'Zoom &In',
                     accelerator: 'Shift+Up',
                     execute: () => this.zoomIn(),
-                    enabled: () => this.activeTarget
+                    enabled: () => this.activeTarget && this.target
                 });
                 view.add({
                     label: 'Zoom &Out',
                     accelerator: 'Shift+Down',
                     execute: () => this.zoomOut(),
-                    enabled: () => this.activeTarget
+                    enabled: () => this.activeTarget && this.target
                 });
                 view.add({
                     label: 'Actual &Size',
                     accelerator: 'Shift+Backspace',
                     execute: () => this.resetZoom(),
-                    enabled: () => this.activeTarget
+                    enabled: () => this.activeTarget && this.target
                 });
                 view.add({});
                 view.add({
@@ -212,7 +214,8 @@ view.View = class {
                     execute: async () => await this._host.execute('about')
                 });
             }
-            this._select = new view.TargetSelector(this, this._element('toolbar-navigator'));
+            const navigator = this._element('toolbar-navigator');
+            this._select = new view.TargetSelector(this, navigator);
             this._select.on('change', (sender, target) => this._updateActiveTarget([target]));
             await this._host.start();
         } catch (error) {
@@ -239,10 +242,10 @@ view.View = class {
         }
         this._host.document.body.classList.remove(...Array.from(this._host.document.body.classList).filter((_) => _ !== 'active'));
         this._host.document.body.classList.add(...page.split(' '));
-        if (page === 'default') {
-            this._activate();
-        } else {
-            this._deactivate();
+        if (this._target && page === 'default') {
+            this._target.register();
+        } else if (this._target) {
+            this._target.unregister();
         }
         if (page === 'welcome') {
             const element = this._element('open-file-button');
@@ -261,24 +264,24 @@ view.View = class {
     }
 
     find() {
-        if (this._graph && this._sidebar.identifier !== 'find') {
-            this._graph.select(null);
+        if (this._target && this._sidebar.identifier !== 'find') {
+            this._target.select(null);
             const sidebar = new view.FindSidebar(this, this._find, this.activeTarget, this.activeSignature);
             sidebar.on('state-changed', (sender, state) => {
                 this._find = state;
             });
             sidebar.on('select', (sender, value) => {
-                this.scrollTo(this._graph.select([value]));
+                this._target.scrollTo(this._target.select([value]));
             });
             sidebar.on('focus', (sender, value) => {
-                this._graph.focus([value]);
+                this._target.focus([value]);
             });
             sidebar.on('blur', (sender, value) => {
-                this._graph.blur([value]);
+                this._target.blur([value]);
             });
             sidebar.on('activate', (sender, value) => {
                 this._sidebar.close();
-                this.scrollTo(this._graph.activate(value));
+                this._target.scrollTo(this._target.activate(value));
             });
             this._sidebar.open(sidebar, 'Find');
         }
@@ -288,8 +291,34 @@ view.View = class {
         return this._model;
     }
 
+    set model(value) {
+        this._model = value;
+    }
+
     get options() {
         return this._options;
+    }
+
+    get target() {
+        return this._target;
+    }
+
+    set target(value) {
+        if (this._target !== value) {
+            if (this._target) {
+                this._target.unregister();
+            }
+            const enabled = value ? true : false;
+            this._host.update({
+                'zoom-reset.enabled': enabled,
+                'zoom-in.enabled': enabled,
+                'zoom-out.enabled': enabled
+            });
+            this._target = value;
+            if (this._target) {
+                this._target.register();
+            }
+        }
     }
 
     toggle(name) {
@@ -339,8 +368,8 @@ view.View = class {
 
     _reload() {
         this.show('welcome spinner');
-        if (this._model && this._stack.length > 0) {
-            this._updateTarget(this._model, this._stack).catch((error) => {
+        if (this._model && this._path.length > 0) {
+            this._updateTarget(this._model, this._path).catch((error) => {
                 if (error) {
                     this.error(error, 'Graph update failed.', 'welcome');
                 }
@@ -359,287 +388,15 @@ view.View = class {
     }
 
     zoomIn() {
-        this._updateZoom(this._zoom * 1.1);
+        this._target.zoom *= 1.1;
     }
 
     zoomOut() {
-        this._updateZoom(this._zoom * 0.9);
+        this._target.zoom *= 0.9;
     }
 
     resetZoom() {
-        this._updateZoom(1);
-    }
-
-    _activate() {
-        if (!this._events) {
-            this._events = {};
-            this._events.scroll = (e) => this._scrollHandler(e);
-            this._events.wheel = (e) => this._wheelHandler(e);
-            this._events.gesturestart = (e) => this._gestureStartHandler(e);
-            this._events.pointerdown = (e) => this._pointerDownHandler(e);
-            this._events.touchstart = (e) => this._touchStartHandler(e);
-        }
-        const graph = this._element('graph');
-        graph.focus();
-        graph.addEventListener('scroll', this._events.scroll);
-        graph.addEventListener('wheel', this._events.wheel, { passive: false });
-        graph.addEventListener('pointerdown', this._events.pointerdown);
-        if (this._host.environment('agent') === 'safari') {
-            graph.addEventListener('gesturestart', this._events.gesturestart, false);
-        } else {
-            graph.addEventListener('touchstart', this._events.touchstart, { passive: true });
-        }
-    }
-
-    _deactivate() {
-        if (this._events) {
-            const graph = this._element('graph');
-            graph.removeEventListener('scroll', this._events.scroll);
-            graph.removeEventListener('wheel', this._events.wheel);
-            graph.removeEventListener('pointerdown', this._events.pointerdown);
-            graph.removeEventListener('gesturestart', this._events.gesturestart);
-            graph.removeEventListener('touchstart', this._events.touchstart);
-        }
-    }
-
-    _updateZoom(zoom, e) {
-        const container = this._element('graph');
-        const canvas = this._element('canvas');
-        const limit = this._options.direction === 'vertical' ?
-            container.clientHeight / this._height :
-            container.clientWidth / this._width;
-        const min = Math.min(Math.max(limit, 0.15), 1);
-        zoom = Math.max(min, Math.min(zoom, 1.4));
-        const scrollLeft = this._scrollLeft || container.scrollLeft;
-        const scrollTop = this._scrollTop || container.scrollTop;
-        const x = (e ? e.pageX : (container.clientWidth / 2)) + scrollLeft;
-        const y = (e ? e.pageY : (container.clientHeight / 2)) + scrollTop;
-        const width = zoom * this._width;
-        const height = zoom * this._height;
-        canvas.style.width = `${width}px`;
-        canvas.style.height = `${height}px`;
-        this._scrollLeft = Math.max(0, ((x * zoom) / this._zoom) - (x - scrollLeft));
-        this._scrollTop = Math.max(0, ((y * zoom) / this._zoom) - (y - scrollTop));
-        container.scrollLeft = this._scrollLeft;
-        container.scrollTop = this._scrollTop;
-        this._zoom = zoom;
-    }
-
-    _pointerDownHandler(e) {
-        if (e.pointerType === 'touch' || e.buttons !== 1) {
-            return;
-        }
-        // Workaround for Firefox emitting 'pointerdown' event when scrollbar is pressed
-        if (e.originalTarget) {
-            try {
-                /* eslint-disable no-unused-expressions */
-                e.originalTarget.id;
-                /* eslint-enable no-unused-expressions */
-            } catch {
-                return;
-            }
-        }
-        const container = this._element('graph');
-        e.target.setPointerCapture(e.pointerId);
-        this._mousePosition = {
-            left: container.scrollLeft,
-            top: container.scrollTop,
-            x: e.clientX,
-            y: e.clientY
-        };
-        e.target.style.cursor = 'grabbing';
-        e.preventDefault();
-        e.stopImmediatePropagation();
-        const pointerMoveHandler = (e) => {
-            e.preventDefault();
-            e.stopImmediatePropagation();
-            if (this._mousePosition) {
-                const dx = e.clientX - this._mousePosition.x;
-                const dy = e.clientY - this._mousePosition.y;
-                this._mousePosition.moved = dx * dx + dy * dy > 0;
-                if (this._mousePosition.moved) {
-                    const container = this._element('graph');
-                    container.scrollTop = this._mousePosition.top - dy;
-                    container.scrollLeft = this._mousePosition.left - dx;
-                }
-            }
-        };
-        const clickHandler = (e) => {
-            e.stopPropagation();
-            document.removeEventListener('click', clickHandler, true);
-        };
-        const pointerUpHandler = (e) => {
-            e.target.releasePointerCapture(e.pointerId);
-            e.target.style.removeProperty('cursor');
-            container.removeEventListener('pointerup', pointerUpHandler);
-            container.removeEventListener('pointermove', pointerMoveHandler);
-            if (this._mousePosition && this._mousePosition.moved) {
-                e.preventDefault();
-                e.stopImmediatePropagation();
-                delete this._mousePosition;
-                document.addEventListener('click', clickHandler, true);
-            }
-        };
-        container.addEventListener('pointermove', pointerMoveHandler);
-        container.addEventListener('pointerup', pointerUpHandler);
-    }
-
-    _touchStartHandler(e) {
-        if (e.touches.length === 2) {
-            this._touchPoints = Array.from(e.touches);
-            this._touchZoom = this._zoom;
-        }
-        const touchMoveHandler = (e) => {
-            if (Array.isArray(this._touchPoints) && this._touchPoints.length === 2 && e.touches.length === 2) {
-                const distance = (points) => {
-                    const dx = (points[1].clientX - points[0].clientX);
-                    const dy = (points[1].clientY - points[0].clientY);
-                    return Math.sqrt(dx * dx + dy * dy);
-                };
-                const d1 = distance(Array.from(e.touches));
-                const d2 = distance(this._touchPoints);
-                if (d2 !== 0) {
-                    const points = this._touchPoints;
-                    const e = {
-                        pageX: (points[1].pageX + points[0].pageX) / 2,
-                        pageY: (points[1].pageY + points[0].pageY) / 2
-                    };
-                    const zoom = d2 === 0 ? d1 : d1 / d2;
-                    this._updateZoom(this._touchZoom * zoom, e);
-                }
-            }
-        };
-        const container = this._element('graph');
-        const touchEndHandler = () => {
-            container.removeEventListener('touchmove', touchMoveHandler, { passive: true });
-            container.removeEventListener('touchcancel', touchEndHandler, { passive: true });
-            container.removeEventListener('touchend', touchEndHandler, { passive: true });
-            delete this._touchPoints;
-            delete this._touchZoom;
-        };
-        container.addEventListener('touchmove', touchMoveHandler, { passive: true });
-        container.addEventListener('touchcancel', touchEndHandler, { passive: true });
-        container.addEventListener('touchend', touchEndHandler, { passive: true });
-    }
-
-    _gestureStartHandler(e) {
-        e.preventDefault();
-        this._gestureZoom = this._zoom;
-        const container = this._element('graph');
-        const gestureChangeHandler = (e) => {
-            e.preventDefault();
-            this._updateZoom(this._gestureZoom * e.scale, e);
-        };
-        const gestureEndHandler = (e) => {
-            container.removeEventListener('gesturechange', gestureChangeHandler, false);
-            container.removeEventListener('gestureend', gestureEndHandler, false);
-            e.preventDefault();
-            if (this._gestureZoom) {
-                this._updateZoom(this._gestureZoom * e.scale, e);
-                delete this._gestureZoom;
-            }
-        };
-        container.addEventListener('gesturechange', gestureChangeHandler, false);
-        container.addEventListener('gestureend', gestureEndHandler, false);
-    }
-
-    _scrollHandler(e) {
-        if (this._scrollLeft && e.target.scrollLeft !== Math.floor(this._scrollLeft)) {
-            delete this._scrollLeft;
-        }
-        if (this._scrollTop && e.target.scrollTop !== Math.floor(this._scrollTop)) {
-            delete this._scrollTop;
-        }
-    }
-
-    _wheelHandler(e) {
-        if (e.shiftKey || e.ctrlKey || this._options.mousewheel === 'zoom') {
-            let factor = 1;
-            if (e.deltaMode === 1) {
-                factor = 0.05;
-            } else if (e.deltaMode) {
-                factor = 1;
-            } else {
-                factor = 0.002;
-            }
-            const delta = -e.deltaY * factor * (e.ctrlKey ? 10 : 1);
-            this._updateZoom(this._zoom * Math.pow(2, delta), e);
-            e.preventDefault();
-        }
-    }
-
-    scrollTo(selection, behavior) {
-        if (selection && selection.length > 0) {
-            const container = this._element('graph');
-            const rect = container.getBoundingClientRect();
-            // Exclude scrollbars
-            const cw = container.clientWidth;
-            const ch = container.clientHeight;
-            // Shrink the test rectangle by 10%
-            const bounds = {};
-            bounds.left = (rect.x + cw / 2) - (cw * 0.45);
-            bounds.width = cw * 0.9;
-            bounds.right = bounds.left + bounds.width;
-            bounds.top = (rect.y + ch / 2) - (ch * 0.45);
-            bounds.height = ch * 0.9;
-            bounds.bottom = bounds.top + bounds.height;
-            let x = 0;
-            let y = 0;
-            let left = Number.POSITIVE_INFINITY;
-            let right = Number.NEGATIVE_INFINITY;
-            let top = Number.POSITIVE_INFINITY;
-            let bottom = Number.NEGATIVE_INFINITY;
-            for (const element of selection) {
-                const rect = element.getBoundingClientRect();
-                const width = Math.min(rect.width, bounds.width);
-                const height = Math.min(rect.height, bounds.height);
-                x += rect.left + (width / 2);
-                y += rect.top + (height / 2);
-                left = Math.min(left, rect.left);
-                right = Math.max(right, rect.right);
-                top = Math.min(top, rect.top);
-                bottom = Math.max(bottom, rect.bottom);
-            }
-            // No need to scroll if new selection is in the safe area.
-            if (right <= bounds.right && left >= bounds.left && bottom <= bounds.bottom && top >= bounds.top) {
-                return;
-            }
-            // If new selection is completely out of the bounds, scroll to centerize it.
-            if (bottom - top >= bounds.height || right - left >= bounds.width || right < rect.left || left > rect.right || bottom < rect.top || top > rect.bottom) {
-                x /= selection.length;
-                y /= selection.length;
-                const options = {};
-                options.left = (container.scrollLeft + x - bounds.left) - (bounds.width / 2);
-                options.top = (container.scrollTop + y - bounds.top) - (bounds.height / 2);
-                options.behavior = behavior || 'smooth';
-                container.scrollTo(options);
-                return;
-            }
-            const options = {};
-            options.left = 0;
-            options.top = 0;
-            options.behavior = behavior || 'smooth';
-            // similar to scrollIntoView block: "nearest"
-            const dr = bounds.right - right;
-            const dl = left - bounds.left;
-            const db = bounds.bottom - bottom;
-            const dt = top - bounds.top;
-            if (right - left < bounds.width) {
-                if (dl < 0) {
-                    options.left = dl;
-                } else if (dr < 0) {
-                    options.left = -dr;
-                }
-            }
-            if (bottom - top < bounds.height) {
-                if (dt < 0) {
-                    options.top = dt;
-                } else if (db < 0) {
-                    options.top = -db;
-                }
-            }
-            container.scrollBy(options);
-        }
+        this._target.zoom = 1;
     }
 
     async error(error, name, screen) {
@@ -661,6 +418,7 @@ view.View = class {
             { message: /^Unsupported Protocol Buffers content/, issue: '593' },
             { message: /^Unsupported Protocol Buffers text content/, issue: '594' },
             { message: /^Unsupported JSON content/, issue: '595' },
+            { message: /^Unknown type name '__torch__\./, issue: '969' },
             { name: 'Error loading ONNX model.', message: /^File format is not onnx\.ModelProto \(Unexpected end of file\)\./, issue: '1155' },
             { name: 'Error loading ONNX model.', message: /^File format is not onnx\.ModelProto \(Cannot read properties of undefined \(reading 'ModelProto'\)\)\./, issue: '1156' },
             { name: 'Error loading ONNX model.', message: /^File format is not onnx\.ModelProto/, issue: '549' }
@@ -700,15 +458,15 @@ view.View = class {
                 });
             }
             await this._timeout(20);
-            const stack = [];
-            if (Array.isArray(model.graphs) && model.graphs.length > 0) {
-                const [graph] = model.graphs;
+            const path = [];
+            if (Array.isArray(model.modules) && model.modules.length > 0) {
+                const [graph] = model.modules;
                 const signature = Array.isArray(graph.signatures) && graph.signatures.length > 0 ? graph.signatures[0] : null;
-                stack.push({ target: graph, signature });
+                path.push({ target: graph, signature });
             } else if (Array.isArray(model.functions) && model.functions.length > 0) {
-                stack.push({ target: model.functions[0], signature: null });
+                path.push({ target: model.functions[0], signature: null });
             }
-            return await this._updateTarget(model, stack);
+            return await this._updateTarget(model, path);
         } catch (error) {
             error.context = !error.context && context && context.identifier ? context.identifier : error.context || '';
             throw error;
@@ -741,42 +499,38 @@ view.View = class {
     }
 
     get activeTarget() {
-        if (Array.isArray(this._stack) && this._stack.length > 0) {
-            return this._stack[0].target;
+        if (this._path.length > 0) {
+            return this._path[0].target;
         }
         return null;
     }
 
     get activeSignature() {
-        if (Array.isArray(this._stack) && this._stack.length > 0) {
-            return this._stack[0].signature;
+        if (this._path.length > 0) {
+            return this._path[0].signature;
         }
         return null;
     }
 
-    async _updateTarget(model, stack) {
+    async _updateTarget(model, path) {
         const lastModel = this._model;
-        const lastStack = this._stack;
+        const lastPath = this._path;
         try {
-            await this._updateStack(model, stack);
+            await this._updatePath(model, path);
             return this._model;
         } catch (error) {
-            await this._updateStack(lastModel, lastStack);
+            await this._updatePath(lastModel, lastPath);
             throw error;
         }
     }
 
-    update(model) {
-        this._model = model;
-    }
-
-    async _updateStack(model, stack) {
-        this.update(model);
-        this._stack = stack;
-        const status = await this.renderGraph(model, this.activeTarget, this.activeSignature, this._options);
+    async _updatePath(model, stack) {
+        this.model = model;
+        this._path = stack;
+        const status = await this.render(this.activeTarget, this.activeSignature);
         if (status !== '') {
-            this.update(null);
-            this._stack = [];
+            this.model = null;
+            this._path = [];
             this._activeTarget = null;
         }
         this.show(null);
@@ -786,11 +540,11 @@ view.View = class {
             path.removeChild(path.lastElementChild);
         }
         if (status === '') {
-            if (this._stack.length <= 1) {
+            if (this._path.length <= 1) {
                 back.style.opacity = 0;
             } else {
                 back.style.opacity = 1;
-                const last = this._stack.length - 2;
+                const last = this._path.length - 2;
                 const count = Math.min(2, last);
                 if (count < last) {
                     const element = this._host.document.createElement('button');
@@ -799,13 +553,13 @@ view.View = class {
                     path.appendChild(element);
                 }
                 for (let i = count; i >= 0; i--) {
-                    const target = this._stack[i].target;
+                    const target = this._path[i].target;
                     const element = this._host.document.createElement('button');
                     element.setAttribute('class', 'toolbar-path-name-button');
                     element.addEventListener('click', async () => {
                         if (i > 0) {
-                            this._stack = this._stack.slice(i);
-                            await this._updateTarget(this._model, this._stack);
+                            this._path = this._path.slice(i);
+                            await this._updateTarget(this._model, this._path);
                         } else {
                             await this.showTargetProperties(target);
                         }
@@ -845,137 +599,53 @@ view.View = class {
     async pushTarget(graph, context) {
         if (graph && graph !== this.activeTarget && Array.isArray(graph.nodes)) {
             this._sidebar.close();
-            if (context && this._stack.length > 0) {
-                this._stack[0].state = { context, zoom: this._zoom };
+            if (context && this._path.length > 0) {
+                this._path[0].state = { context, zoom: this._target.zoom };
             }
             const signature = Array.isArray(graph.signatures) && graph.signatures.length > 0 ? graph.signatures[0] : null;
             const entry = { target: graph, signature };
-            const stack = [entry].concat(this._stack);
+            const stack = [entry].concat(this._path);
             await this._updateTarget(this._model, stack);
         }
     }
 
     async popTarget() {
-        if (this._stack.length > 1) {
+        if (this._path.length > 1) {
             this._sidebar.close();
-            return await this._updateTarget(this._model, this._stack.slice(1));
+            return await this._updateTarget(this._model, this._path.slice(1));
         }
         return null;
     }
 
-    async renderGraph(model, graph, signature, options) {
-        this._graph = null;
-        const canvas = this._element('canvas');
-        while (canvas.lastChild) {
-            canvas.removeChild(canvas.lastChild);
+    async render(target, signature) {
+        this.target = null;
+        const element = this._element('target');
+        while (element.lastChild) {
+            element.removeChild(element.lastChild);
         }
-        if (!graph) {
-            return '';
-        }
-        this._zoom = 1;
-        const groups = graph.groups || false;
-        const nodes = graph.nodes;
-        this._host.event('graph_view', {
-            graph_node_count: nodes.length,
-            graph_skip: 0
-        });
-        const viewGraph = new view.Graph(this, this._host, model, options, groups);
-        viewGraph.add(graph, signature);
-        // Workaround for Safari background drag/zoom issue:
-        // https://stackoverflow.com/questions/40887193/d3-js-zoom-is-not-working-with-mousewheel-in-safari
-        const background = this._host.document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        background.setAttribute('id', 'background');
-        background.setAttribute('fill', 'none');
-        background.setAttribute('pointer-events', 'all');
-        canvas.appendChild(background);
-        const origin = this._host.document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        origin.setAttribute('id', 'origin');
-        canvas.appendChild(origin);
-        viewGraph.build(this._host.document, origin);
-        await this._timeout(20);
-        viewGraph.measure();
-        const status = await viewGraph.layout(this._worker);
-        if (status === '') {
-            viewGraph.update();
-            const elements = Array.from(canvas.getElementsByClassName('graph-input') || []);
-            if (elements.length === 0) {
-                const nodeElements = Array.from(canvas.getElementsByClassName('graph-node') || []);
-                if (nodeElements.length > 0) {
-                    elements.push(nodeElements[0]);
-                }
+        let status = '';
+        if (target) {
+            const document = this._host.document;
+            const graph = target;
+            const groups = graph.groups || false;
+            const nodes = graph.nodes;
+            this._host.event('graph_view', {
+                graph_node_count: nodes.length,
+                graph_skip: 0
+            });
+            const viewGraph = new view.Graph(this, groups);
+            viewGraph.add(graph, signature);
+            viewGraph.build(document);
+            await viewGraph.measure();
+            status = await viewGraph.layout(this._worker);
+            if (status === '') {
+                viewGraph.update();
+                const state = this._path && this._path.length > 0 && this._path[0] && this._path[0].state ? this._path[0].state : null;
+                viewGraph.restore(state);
+                this.target = viewGraph;
             }
-            const size = canvas.getBBox();
-            const margin = 100;
-            const width = Math.ceil(margin + size.width + margin);
-            const height = Math.ceil(margin + size.height + margin);
-            origin.setAttribute('transform', `translate(${margin - size.x}, ${margin - size.y}) scale(1)`);
-            background.setAttribute('width', width);
-            background.setAttribute('height', height);
-            this._width = width;
-            this._height = height;
-            delete this._scrollLeft;
-            delete this._scrollRight;
-            canvas.setAttribute('viewBox', `0 0 ${width} ${height}`);
-            canvas.setAttribute('width', width);
-            canvas.setAttribute('height', height);
-            const state = this._stack && this._stack.length > 0 && this._stack[0] && this._stack[0].state ? this._stack[0].state : null;
-            this._zoom = state ? state.zoom : 1;
-            this._updateZoom(this._zoom);
-            const container = this._element('graph');
-            const context = state ? viewGraph.select([state.context]) : [];
-            if (context.length > 0) {
-                this.scrollTo(context, 'instant');
-            } else if (elements && elements.length > 0) {
-                // Center view based on input elements
-                const bounds = container.getBoundingClientRect();
-                const xs = [];
-                const ys = [];
-                for (let i = 0; i < elements.length; i++) {
-                    const element = elements[i];
-                    const rect = element.getBoundingClientRect();
-                    const width = Math.min(rect.width, bounds.width);
-                    const height = Math.min(rect.width, bounds.width);
-                    xs.push(rect.left + (width / 2));
-                    ys.push(rect.top + (height / 2));
-                }
-                let [x] = xs;
-                const [y] = ys;
-                if (ys.every((y) => y === ys[0])) {
-                    x = xs.reduce((a, b) => a + b, 0) / xs.length;
-                }
-                const left = (container.scrollLeft + x - bounds.left) - (bounds.width / 2);
-                const top = (container.scrollTop + y - bounds.top) - (bounds.height / 2);
-                container.scrollTo({ left, top, behavior: 'auto' });
-            } else {
-                const canvasRect = canvas.getBoundingClientRect();
-                const graphRect = container.getBoundingClientRect();
-                const left = (container.scrollLeft + (canvasRect.width / 2) - graphRect.left) - (graphRect.width / 2);
-                const top = (container.scrollTop + (canvasRect.height / 2) - graphRect.top) - (graphRect.height / 2);
-                container.scrollTo({ left, top, behavior: 'auto' });
-            }
-            this._graph = viewGraph;
         }
         return status;
-    }
-
-    applyStyleSheet(element, name) {
-        let rules = [];
-        for (const styleSheet of this._host.document.styleSheets) {
-            if (styleSheet && styleSheet.href && styleSheet.href.endsWith(`/${name}`)) {
-                rules = styleSheet.cssRules;
-                break;
-            }
-        }
-        const nodes = element.getElementsByTagName('*');
-        for (const node of nodes) {
-            for (const rule of rules) {
-                if (node.matches(rule.selectorText)) {
-                    for (const item of rule.style) {
-                        node.style[item] = rule.style[item];
-                    }
-                }
-            }
-        }
     }
 
     async export(file) {
@@ -984,7 +654,27 @@ view.View = class {
         if (this.activeTarget && (extension === 'png' || extension === 'svg')) {
             const canvas = this._element('canvas');
             const clone = canvas.cloneNode(true);
-            this.applyStyleSheet(clone, 'grapher.css');
+            const document = this._host.document;
+            const applyStyleSheet = (element, name) => {
+                let rules = [];
+                for (const styleSheet of document.styleSheets) {
+                    if (styleSheet && styleSheet.href && styleSheet.href.endsWith(`/${name}`)) {
+                        rules = styleSheet.cssRules;
+                        break;
+                    }
+                }
+                const nodes = element.getElementsByTagName('*');
+                for (const node of nodes) {
+                    for (const rule of rules) {
+                        if (node.matches(rule.selectorText)) {
+                            for (const item of rule.style) {
+                                node.style[item] = rule.style[item];
+                            }
+                        }
+                    }
+                }
+            };
+            applyStyleSheet(clone, 'grapher.css');
             clone.setAttribute('id', 'export');
             clone.removeAttribute('viewBox');
             clone.removeAttribute('width');
@@ -1055,7 +745,7 @@ view.View = class {
         }
     }
 
-    showDocumentProperties() {
+    showModelProperties() {
         if (!this._model) {
             return;
         }
@@ -1068,6 +758,10 @@ view.View = class {
     }
 
     showTargetProperties() {
+        if (this._sidebar.identifier === 'target') {
+            this.showModelProperties();
+            return;
+        }
         const target = this.activeTarget;
         if (!target) {
             return;
@@ -1078,19 +772,19 @@ view.View = class {
                 await this.showDefinition(target);
             });
             sidebar.on('focus', (sender, value) => {
-                this._graph.focus([value]);
+                this._target.focus([value]);
             });
             sidebar.on('blur', (sender, value) => {
-                this._graph.blur([value]);
+                this._target.blur([value]);
             });
             sidebar.on('select', (sender, value) => {
-                this.scrollTo(this._graph.select([value]));
+                this._target.scrollTo(this._target.select([value]));
             });
             sidebar.on('activate', (sender, value) => {
-                this.scrollTo(this._graph.activate(value));
+                this._target.scrollTo(this._target.activate(value));
             });
             sidebar.on('deactivate', () => {
-                this._graph.select(null);
+                this._target.select(null);
             });
             let title = null;
             const type = target.type || 'graph';
@@ -1124,16 +818,16 @@ view.View = class {
                     await this.showDefinition(node.type);
                 });
                 sidebar.on('focus', (sender, value) => {
-                    this._graph.focus([value]);
+                    this._target.focus([value]);
                 });
                 sidebar.on('blur', (sender, value) => {
-                    this._graph.blur([value]);
+                    this._target.blur([value]);
                 });
                 sidebar.on('select', (sender, value) => {
-                    this.scrollTo(this._graph.select([value]));
+                    this._target.scrollTo(this._target.select([value]));
                 });
                 sidebar.on('activate', (sender, value) => {
-                    this.scrollTo(this._graph.activate(value));
+                    this._target.scrollTo(this._target.activate(value));
                 });
                 this._sidebar.open(sidebar, 'Node Properties');
             } catch (error) {
@@ -1149,16 +843,16 @@ view.View = class {
             }
             const sidebar = new view.ConnectionSidebar(this, value, from, to);
             sidebar.on('focus', (sender, value) => {
-                this._graph.focus([value]);
+                this._target.focus([value]);
             });
             sidebar.on('blur', (sender, value) => {
-                this._graph.blur([value]);
+                this._target.blur([value]);
             });
             sidebar.on('select', (sender, value) => {
-                this.scrollTo(this._graph.select([value]));
+                this._target.scrollTo(this._target.select([value]));
             });
             sidebar.on('activate', (sender, value) => {
-                this.scrollTo(this._graph.activate(value));
+                this._target.scrollTo(this._target.activate(value));
             });
             this._sidebar.push(sidebar, 'Connection Properties');
         } catch (error) {
@@ -1173,16 +867,16 @@ view.View = class {
             }
             const sidebar = new view.TensorSidebar(this, value);
             sidebar.on('focus', (sender, value) => {
-                this._graph.focus([value]);
+                this._target.focus([value]);
             });
             sidebar.on('blur', () => {
-                this._graph.blur(null);
+                this._target.blur(null);
             });
             sidebar.on('select', (sender, value) => {
-                this.scrollTo(this._graph.select([value]));
+                this._target.scrollTo(this._target.select([value]));
             });
             sidebar.on('activate', (sender, value) => {
-                this.scrollTo(this._graph.activate(value));
+                this._target.scrollTo(this._target.activate(value));
             });
             this._sidebar.push(sidebar, 'Tensor Properties');
         } catch (error) {
@@ -1266,31 +960,23 @@ view.Menu = class {
             }
         };
         this._keyup = (e) => {
-            const code = e.keyCode;
-            if (code === 0x0012 && this._alt) { // Alt
-                switch (this._stack.length) {
-                    case 0: {
-                        if (this.open()) {
-                            e.preventDefault();
-                        }
-                        break;
-                    }
-                    case 1: {
-                        if (this.close()) {
-                            e.preventDefault();
-                        }
-                        break;
-                    }
-                    default: {
-                        this._stack = [this];
-                        if (this._root.length > 1) {
-                            this._root =  [this];
-                            this._rebuild();
-                        }
-                        this._update();
+            if (e.keyCode === 0x0012 && this._alt) { // Alt
+                if (this._stack.length === 0) {
+                    if (this.open()) {
                         e.preventDefault();
-                        break;
                     }
+                } else if (this._stack.length === 1) {
+                    if (this.close()) {
+                        e.preventDefault();
+                    }
+                } else {
+                    this._stack = [this];
+                    if (this._root.length > 1) {
+                        this._root =  [this];
+                        this._rebuild();
+                    }
+                    this._update();
+                    e.preventDefault();
                 }
             }
             this._alt = false;
@@ -1744,21 +1430,16 @@ view.Worker = class {
 
     constructor(host) {
         this._host = host;
-        const type = this._host.type;
-        this._browser = type === 'Browser' || type === 'Python';
-        if (this._browser) {
-            this._create();
-        }
+        this._timeout = -1;
+        this._create();
     }
 
     async request(message, delay, notification) {
-        this._timeout = -1;
+        this._cancel();
         return new Promise((resolve, reject) => {
             this._resolve = resolve;
             this._reject = reject;
-            if (!this._worker) {
-                this._create();
-            }
+            this._create();
             this._worker.postMessage(message);
             this._timeout = setTimeout(async () => {
                 await this._host.message(notification, null, 'Cancel');
@@ -1771,39 +1452,41 @@ view.Worker = class {
     }
 
     _create() {
-        this._worker = this._host.worker('./worker');
-        this._worker.addEventListener('message', (e) => {
-            this._cancel(false);
-            const message = e.data;
-            const resolve = this._resolve;
-            const reject = this._reject;
-            delete this._resolve;
-            delete this._reject;
-            if (reject && message.type === 'error') {
-                const error = new Error(`Worker: ${message.message}`);
-                reject(error);
-            } else if (resolve) {
-                resolve(message);
-            }
-        });
-        this._worker.addEventListener('error', (e) => {
-            this._cancel(true);
-            const reject = this._reject;
-            delete this._resolve;
-            delete this._reject;
-            if (reject) {
-                reject(new Error(`Unknown worker error type '${e.type}'.`));
-            }
-        });
+        if (!this._worker) {
+            this._worker = this._host.worker('./worker');
+            this._worker.addEventListener('message', (e) => {
+                this._cancel(false);
+                const message = e.data;
+                const resolve = this._resolve;
+                const reject = this._reject;
+                delete this._resolve;
+                delete this._reject;
+                if (reject && message.type === 'error') {
+                    const error = new Error(`Worker: ${message.message}`);
+                    reject(error);
+                } else if (resolve) {
+                    resolve(message);
+                }
+            });
+            this._worker.addEventListener('error', (e) => {
+                this._cancel(true);
+                const reject = this._reject;
+                delete this._resolve;
+                delete this._reject;
+                if (reject) {
+                    reject(new Error(`Unknown worker error type '${e.type}'.`));
+                }
+            });
+        }
     }
 
     _cancel(terminate) {
-        terminate = terminate || !this._browser;
+        terminate = terminate || this._host.type === 'Test';
         if (this._worker && terminate) {
             this._worker.terminate();
             this._worker = null;
         }
-        if (this._timeout >= 0) {
+        if (this._timeout !== -1) {
             clearTimeout(this._timeout);
             this._timeout = -1;
             this._host.message();
@@ -1813,18 +1496,28 @@ view.Worker = class {
 
 view.Graph = class extends grapher.Graph {
 
-    constructor(view, host, model, options, compound) {
+    constructor(view, compound) {
         super(compound);
         this.view = view;
-        this.host = host;
-        this.model = model;
-        this.options = options;
         this.counter = 0;
         this._nodeKey = 0;
         this._values = new Map();
         this._tensors = new Map();
         this._table = new Map();
         this._selection = new Set();
+        this._zoom = 1;
+    }
+
+    get model() {
+        return this.view.model;
+    }
+
+    get host() {
+        return this.view.host;
+    }
+
+    get options() {
+        return this.view.options;
     }
 
     createNode(node) {
@@ -1986,11 +1679,52 @@ view.Graph = class extends grapher.Graph {
         }
     }
 
-    build(document, origin) {
+    build(document) {
+        const element = document.getElementById('target');
+        while (element.lastChild) {
+            element.removeChild(element.lastChild);
+        }
+        const canvas = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        canvas.setAttribute('id', 'canvas');
+        canvas.setAttribute('class', 'canvas');
+        canvas.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+        canvas.setAttribute('width', '100%');
+        canvas.setAttribute('height', '100%');
+        element.appendChild(canvas);
+        // Workaround for Safari background drag/zoom issue:
+        // https://stackoverflow.com/questions/40887193/d3-js-zoom-is-not-working-with-mousewheel-in-safari
+        const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+        background.setAttribute('id', 'background');
+        background.setAttribute('fill', 'none');
+        background.setAttribute('pointer-events', 'all');
+        canvas.appendChild(background);
+        const origin = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        origin.setAttribute('id', 'origin');
+        canvas.appendChild(origin);
         for (const value of this._values.values()) {
             value.build();
         }
-        super.build(document, origin);
+        super.build(document);
+    }
+
+    async measure() {
+        const document = this.host.document;
+        const window = this.host.window;
+        if (document.fonts && document.fonts.ready) {
+            try {
+                await document.fonts.ready;
+            } catch {
+                // continue regardless of error
+            }
+        }
+        await new Promise((resolve) => {
+            window.requestAnimationFrame(() => {
+                window.requestAnimationFrame(() => {
+                    window.requestAnimationFrame(resolve);
+                });
+            });
+        });
+        await super.measure();
     }
 
     select(selection) {
@@ -2039,6 +1773,357 @@ view.Graph = class extends grapher.Graph {
             if (element && !this._selection.has(element)) {
                 element.deselect();
             }
+        }
+    }
+
+    restore(state) {
+        const document = this.host.document;
+        const canvas = document.getElementById('canvas');
+        const origin = document.getElementById('origin');
+        const background = document.getElementById('background');
+        const elements = Array.from(canvas.getElementsByClassName('graph-input') || []);
+        if (elements.length === 0) {
+            const nodeElements = Array.from(canvas.getElementsByClassName('graph-node') || []);
+            if (nodeElements.length > 0) {
+                elements.push(nodeElements[0]);
+            }
+        }
+        const size = canvas.getBBox();
+        const margin = 100;
+        const width = Math.ceil(margin + size.width + margin);
+        const height = Math.ceil(margin + size.height + margin);
+        origin.setAttribute('transform', `translate(${margin - size.x}, ${margin - size.y}) scale(1)`);
+        background.setAttribute('width', width);
+        background.setAttribute('height', height);
+        this._width = width;
+        this._height = height;
+        delete this._scrollLeft;
+        delete this._scrollRight;
+        canvas.setAttribute('viewBox', `0 0 ${width} ${height}`);
+        canvas.setAttribute('width', width);
+        canvas.setAttribute('height', height);
+        this._zoom = state ? state.zoom : 1;
+        this._updateZoom(this._zoom);
+        const container = document.getElementById('target');
+        const context = state ? this.select([state.context]) : [];
+        if (context.length > 0) {
+            this.scrollTo(context, 'instant');
+        } else if (elements && elements.length > 0) {
+            // Center view based on input elements
+            const bounds = container.getBoundingClientRect();
+            const xs = [];
+            const ys = [];
+            for (let i = 0; i < elements.length; i++) {
+                const element = elements[i];
+                const rect = element.getBoundingClientRect();
+                const width = Math.min(rect.width, bounds.width);
+                const height = Math.min(rect.width, bounds.width);
+                xs.push(rect.left + (width / 2));
+                ys.push(rect.top + (height / 2));
+            }
+            let [x] = xs;
+            const [y] = ys;
+            if (ys.every((y) => y === ys[0])) {
+                x = xs.reduce((a, b) => a + b, 0) / xs.length;
+            }
+            const left = (container.scrollLeft + x - bounds.left) - (bounds.width / 2);
+            const top = (container.scrollTop + y - bounds.top) - (bounds.height / 2);
+            container.scrollTo({ left, top, behavior: 'auto' });
+        } else {
+            const canvasRect = canvas.getBoundingClientRect();
+            const graphRect = container.getBoundingClientRect();
+            const left = (container.scrollLeft + (canvasRect.width / 2) - graphRect.left) - (graphRect.width / 2);
+            const top = (container.scrollTop + (canvasRect.height / 2) - graphRect.top) - (graphRect.height / 2);
+            container.scrollTo({ left, top, behavior: 'auto' });
+        }
+    }
+
+    register() {
+        if (!this._events) {
+            this._events = {};
+            this._events.scroll = (e) => this._scrollHandler(e);
+            this._events.wheel = (e) => this._wheelHandler(e);
+            this._events.gesturestart = (e) => this._gestureStartHandler(e);
+            this._events.pointerdown = (e) => this._pointerDownHandler(e);
+            this._events.touchstart = (e) => this._touchStartHandler(e);
+            const document = this.host.document;
+            const element = document.getElementById('target');
+            element.focus();
+            element.addEventListener('scroll', this._events.scroll);
+            element.addEventListener('wheel', this._events.wheel, { passive: false });
+            element.addEventListener('pointerdown', this._events.pointerdown);
+            if (this.host.environment('agent') === 'safari') {
+                element.addEventListener('gesturestart', this._events.gesturestart, false);
+            } else {
+                element.addEventListener('touchstart', this._events.touchstart, { passive: true });
+            }
+        }
+    }
+
+    unregister() {
+        if (this._events) {
+            const document = this.host.document;
+            const element = document.getElementById('target');
+            element.removeEventListener('scroll', this._events.scroll);
+            element.removeEventListener('wheel', this._events.wheel);
+            element.removeEventListener('pointerdown', this._events.pointerdown);
+            element.removeEventListener('gesturestart', this._events.gesturestart);
+            element.removeEventListener('touchstart', this._events.touchstart);
+            delete this._events;
+        }
+    }
+
+    get zoom() {
+        return this._zoom;
+    }
+
+    set zoom(value) {
+        this._updateZoom(value);
+    }
+
+    _updateZoom(zoom, e) {
+        const document = this.host.document;
+        const container = document.getElementById('target');
+        const canvas = document.getElementById('canvas');
+        const limit = this.view.options.direction === 'vertical' ?
+            container.clientHeight / this._height :
+            container.clientWidth / this._width;
+        const min = Math.min(Math.max(limit, 0.15), 1);
+        zoom = Math.max(min, Math.min(zoom, 1.4));
+        const scrollLeft = this._scrollLeft || container.scrollLeft;
+        const scrollTop = this._scrollTop || container.scrollTop;
+        const x = (e ? e.pageX : (container.clientWidth / 2)) + scrollLeft;
+        const y = (e ? e.pageY : (container.clientHeight / 2)) + scrollTop;
+        const width = zoom * this._width;
+        const height = zoom * this._height;
+        canvas.style.width = `${width}px`;
+        canvas.style.height = `${height}px`;
+        this._scrollLeft = Math.max(0, ((x * zoom) / this._zoom) - (x - scrollLeft));
+        this._scrollTop = Math.max(0, ((y * zoom) / this._zoom) - (y - scrollTop));
+        container.scrollLeft = this._scrollLeft;
+        container.scrollTop = this._scrollTop;
+        this._zoom = zoom;
+    }
+
+    _pointerDownHandler(e) {
+        if (e.pointerType === 'touch' || e.buttons !== 1) {
+            return;
+        }
+        // Workaround for Firefox emitting 'pointerdown' event when scrollbar is pressed
+        if (e.originalTarget) {
+            try {
+                /* eslint-disable no-unused-expressions */
+                e.originalTarget.id;
+                /* eslint-enable no-unused-expressions */
+            } catch {
+                return;
+            }
+        }
+        const document = this.host.document;
+        const container = document.getElementById('target');
+        e.target.setPointerCapture(e.pointerId);
+        this._mousePosition = {
+            left: container.scrollLeft,
+            top: container.scrollTop,
+            x: e.clientX,
+            y: e.clientY
+        };
+        e.target.style.cursor = 'grabbing';
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        const pointerMoveHandler = (e) => {
+            e.preventDefault();
+            e.stopImmediatePropagation();
+            if (this._mousePosition) {
+                const dx = e.clientX - this._mousePosition.x;
+                const dy = e.clientY - this._mousePosition.y;
+                this._mousePosition.moved = dx * dx + dy * dy > 0;
+                if (this._mousePosition.moved) {
+                    const document = this.host.document;
+                    const container = document.getElementById('target');
+                    container.scrollTop = this._mousePosition.top - dy;
+                    container.scrollLeft = this._mousePosition.left - dx;
+                }
+            }
+        };
+        const clickHandler = (e) => {
+            e.stopPropagation();
+            document.removeEventListener('click', clickHandler, true);
+        };
+        const pointerUpHandler = (e) => {
+            e.target.releasePointerCapture(e.pointerId);
+            e.target.style.removeProperty('cursor');
+            container.removeEventListener('pointerup', pointerUpHandler);
+            container.removeEventListener('pointermove', pointerMoveHandler);
+            if (this._mousePosition && this._mousePosition.moved) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                delete this._mousePosition;
+                document.addEventListener('click', clickHandler, true);
+            }
+        };
+        container.addEventListener('pointermove', pointerMoveHandler);
+        container.addEventListener('pointerup', pointerUpHandler);
+    }
+
+    _touchStartHandler(e) {
+        if (e.touches.length === 2) {
+            this._touchPoints = Array.from(e.touches);
+            this._touchZoom = this._zoom;
+        }
+        const touchMoveHandler = (e) => {
+            if (Array.isArray(this._touchPoints) && this._touchPoints.length === 2 && e.touches.length === 2) {
+                const distance = (points) => {
+                    const dx = (points[1].clientX - points[0].clientX);
+                    const dy = (points[1].clientY - points[0].clientY);
+                    return Math.sqrt(dx * dx + dy * dy);
+                };
+                const d1 = distance(Array.from(e.touches));
+                const d2 = distance(this._touchPoints);
+                if (d2 !== 0) {
+                    const points = this._touchPoints;
+                    const e = {
+                        pageX: (points[1].pageX + points[0].pageX) / 2,
+                        pageY: (points[1].pageY + points[0].pageY) / 2
+                    };
+                    const zoom = d2 === 0 ? d1 : d1 / d2;
+                    this._updateZoom(this._touchZoom * zoom, e);
+                }
+            }
+        };
+        const document = this.host.document;
+        const container = document.getElementById('target');
+        const touchEndHandler = () => {
+            container.removeEventListener('touchmove', touchMoveHandler, { passive: true });
+            container.removeEventListener('touchcancel', touchEndHandler, { passive: true });
+            container.removeEventListener('touchend', touchEndHandler, { passive: true });
+            delete this._touchPoints;
+            delete this._touchZoom;
+        };
+        container.addEventListener('touchmove', touchMoveHandler, { passive: true });
+        container.addEventListener('touchcancel', touchEndHandler, { passive: true });
+        container.addEventListener('touchend', touchEndHandler, { passive: true });
+    }
+
+    _gestureStartHandler(e) {
+        e.preventDefault();
+        this._gestureZoom = this._zoom;
+        const document = this.host.document;
+        const container = document.getElementById('target');
+        const gestureChangeHandler = (e) => {
+            e.preventDefault();
+            this._updateZoom(this._gestureZoom * e.scale, e);
+        };
+        const gestureEndHandler = (e) => {
+            container.removeEventListener('gesturechange', gestureChangeHandler, false);
+            container.removeEventListener('gestureend', gestureEndHandler, false);
+            e.preventDefault();
+            if (this._gestureZoom) {
+                this._updateZoom(this._gestureZoom * e.scale, e);
+                delete this._gestureZoom;
+            }
+        };
+        container.addEventListener('gesturechange', gestureChangeHandler, false);
+        container.addEventListener('gestureend', gestureEndHandler, false);
+    }
+
+    _scrollHandler(e) {
+        if (this._scrollLeft && e.target.scrollLeft !== Math.floor(this._scrollLeft)) {
+            delete this._scrollLeft;
+        }
+        if (this._scrollTop && e.target.scrollTop !== Math.floor(this._scrollTop)) {
+            delete this._scrollTop;
+        }
+    }
+
+    _wheelHandler(e) {
+        if (e.shiftKey || e.ctrlKey || this.view.options.mousewheel === 'zoom') {
+            let factor = 1;
+            if (e.deltaMode === 1) {
+                factor = 0.05;
+            } else if (e.deltaMode) {
+                factor = 1;
+            } else {
+                factor = 0.002;
+            }
+            const delta = -e.deltaY * factor * (e.ctrlKey ? 10 : 1);
+            this._updateZoom(this._zoom * Math.pow(2, delta), e);
+            e.preventDefault();
+        }
+    }
+
+    scrollTo(selection, behavior) {
+        if (selection && selection.length > 0) {
+            const document = this.host.document;
+            const container = document.getElementById('target');
+            const rect = container.getBoundingClientRect();
+            // Exclude scrollbars
+            const cw = container.clientWidth;
+            const ch = container.clientHeight;
+            // Shrink the test rectangle by 10%
+            const bounds = {};
+            bounds.left = (rect.x + cw / 2) - (cw * 0.45);
+            bounds.width = cw * 0.9;
+            bounds.right = bounds.left + bounds.width;
+            bounds.top = (rect.y + ch / 2) - (ch * 0.45);
+            bounds.height = ch * 0.9;
+            bounds.bottom = bounds.top + bounds.height;
+            let x = 0;
+            let y = 0;
+            let left = Number.POSITIVE_INFINITY;
+            let right = Number.NEGATIVE_INFINITY;
+            let top = Number.POSITIVE_INFINITY;
+            let bottom = Number.NEGATIVE_INFINITY;
+            for (const element of selection) {
+                const rect = element.getBoundingClientRect();
+                const width = Math.min(rect.width, bounds.width);
+                const height = Math.min(rect.height, bounds.height);
+                x += rect.left + (width / 2);
+                y += rect.top + (height / 2);
+                left = Math.min(left, rect.left);
+                right = Math.max(right, rect.right);
+                top = Math.min(top, rect.top);
+                bottom = Math.max(bottom, rect.bottom);
+            }
+            // No need to scroll if new selection is in the safe area.
+            if (right <= bounds.right && left >= bounds.left && bottom <= bounds.bottom && top >= bounds.top) {
+                return;
+            }
+            // If new selection is completely out of the bounds, scroll to centerize it.
+            if (bottom - top >= bounds.height || right - left >= bounds.width || right < rect.left || left > rect.right || bottom < rect.top || top > rect.bottom) {
+                x /= selection.length;
+                y /= selection.length;
+                const options = {};
+                options.left = (container.scrollLeft + x - bounds.left) - (bounds.width / 2);
+                options.top = (container.scrollTop + y - bounds.top) - (bounds.height / 2);
+                options.behavior = behavior || 'smooth';
+                container.scrollTo(options);
+                return;
+            }
+            const options = {};
+            options.left = 0;
+            options.top = 0;
+            options.behavior = behavior || 'smooth';
+            // similar to scrollIntoView block: "nearest"
+            const dr = bounds.right - right;
+            const dl = left - bounds.left;
+            const db = bounds.bottom - bottom;
+            const dt = top - bounds.top;
+            if (right - left < bounds.width) {
+                if (dl < 0) {
+                    options.left = dl;
+                } else if (dr < 0) {
+                    options.left = -dr;
+                }
+            }
+            if (bottom - top < bounds.height) {
+                if (dt < 0) {
+                    options.top = dt;
+                } else if (db < 0) {
+                    options.top = -db;
+                }
+            }
+            container.scrollBy(options);
         }
     }
 };
@@ -2240,12 +2325,12 @@ view.Node = class extends grapher.Node {
 
     toggle() {
         this._expand.content = '-';
-        this._graph = new view.Graph(this.context.view, this.context.view.host, this.context.model, this.context.options, false, {});
-        this._graph.add(this.value);
+        this.context.view.target = new view.Graph(this.context.view, false);
+        this.context.view.target.add(this.value);
         // const document = this.element.ownerDocument;
         // const parent = this.element.parentElement;
-        // this._graph.build(document, parent);
-        // this._graph.update();
+        // this._target.build(document, parent);
+        // this._target.update();
         this.canvas.width = 300;
         this.canvas.height = 300;
         this.layout();
@@ -2548,7 +2633,7 @@ view.Sidebar = class {
     _update(stack) {
         const sidebar = this._element('sidebar');
         const element = this._element('sidebar-content');
-        const container = this._element('graph');
+        const container = this._element('target');
         const closeButton = this._element('sidebar-closebutton');
         closeButton.removeEventListener('click', this._closeSidebarHandler);
         this._host.document.removeEventListener('keydown', this._closeSidebarKeyDownHandler);
@@ -2615,10 +2700,14 @@ view.Control = class {
     }
 
     emit(event, data) {
-        if (this._events && this._events[event]) {
-            for (const callback of this._events[event]) {
-                callback(this, data);
+        try {
+            if (this._events && this._events[event]) {
+                for (const callback of this._events[event]) {
+                    callback(this, data);
+                }
             }
+        } catch (error) {
+            this.error(error, false);
         }
     }
 
@@ -2714,13 +2803,13 @@ view.TargetSelector = class extends view.Control {
                 }
             }
         };
-        const graphs = [];
+        const modules = [];
         const signatures = [];
         const functions = [];
-        if (model && Array.isArray(model.graphs)) {
-            for (const graph of model.graphs) {
+        if (model && Array.isArray(model.modules)) {
+            for (const graph of model.modules) {
                 const name = graph.name || '(unnamed)';
-                graphs.push({ name, target: graph, signature: null });
+                modules.push({ name, target: graph, signature: null });
                 if (Array.isArray(graph.functions)) {
                     for (const func of graph.functions) {
                         functions.push({ name: `${name}.${func.name}`, target: func, signature: null });
@@ -2738,10 +2827,10 @@ view.TargetSelector = class extends view.Control {
                 functions.push({ name: func.name, target: func, signature: null });
             }
         }
-        section('Graphs', graphs);
+        section('Modules', modules);
         section('Signatures', signatures);
         section('Functions', functions);
-        const visible = functions.length > 0 || signatures.length > 0 || graphs.length > 1;
+        const visible = functions.length > 0 || signatures.length > 0 || modules.length > 1;
         this._element.style.display = visible ? 'inline' : 'none';
     }
 };
@@ -2953,19 +3042,27 @@ view.TextView = class extends view.Control {
             for (const item of list) {
                 const line = this.createElement('div', className);
                 switch (style) {
-                    case 'code':
-                        line.innerHTML = `<code>${item}<code>`;
+                    case 'code': {
+                        const element = this.createElement('code');
+                        element.textContent = item;
+                        line.appendChild(element);
                         break;
-                    case 'bold':
-                        line.innerHTML = `<b>${item}<b>`;
+                    }
+                    case 'bold': {
+                        const element = this.createElement('b');
+                        element.textContent = item;
+                        line.appendChild(element);
                         break;
-                    case 'nowrap':
+                    }
+                    case 'nowrap': {
                         line.innerText = item;
                         line.style.whiteSpace = style;
                         break;
-                    default:
+                    }
+                    default: {
                         line.innerText = item;
                         break;
+                    }
                 }
                 this.element.appendChild(line);
                 className = 'sidebar-item-value-line-border';
@@ -3022,7 +3119,11 @@ view.ArgumentView = class extends view.Control {
             });
         }
         this._source = typeof type === 'string' && !type.endsWith('*') ? 'attribute' : this._source;
-        if (this._source === 'attribute' && type !== 'tensor' && type !== 'tensor?' && type !== 'tensor[]' && type !== 'tensor?[]') {
+        const primitive = typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean' || typeof value === 'bigint';
+        if (primitive) {
+            const item = new view.PrimitiveView(context, argument);
+            this._items.push(item);
+        } else if (this._source === 'attribute' && type !== 'tensor' && type !== 'tensor?' && type !== 'tensor[]' && type !== 'tensor?[]') {
             this._source = 'attribute';
             const item = new view.PrimitiveView(context, argument);
             this._items.push(item);
@@ -3921,7 +4022,7 @@ view.FindSidebar = class extends view.Control {
 
     constructor(context, state, graph, signature) {
         super(context);
-        this._graph = graph;
+        this._target = graph;
         this._signature = signature;
         this._state = state || {
             query: '',
@@ -3947,10 +4048,14 @@ view.FindSidebar = class extends view.Control {
     }
 
     emit(event, data) {
-        if (this._events && this._events[event]) {
-            for (const callback of this._events[event]) {
-                callback(this, data);
+        try {
+            if (this._events && this._events[event]) {
+                for (const callback of this._events[event]) {
+                    callback(this, data);
+                }
             }
+        } catch (error) {
+            this.error(error, false);
         }
     }
 
@@ -4113,7 +4218,7 @@ view.FindSidebar = class extends view.Control {
     _update() {
         try {
             this._reset();
-            const inputs = this._signature ? this._signature.inputs : this._graph.inputs;
+            const inputs = this._signature ? this._signature.inputs : this._target.inputs;
             if (this._state.connection) {
                 for (const input of inputs) {
                     for (const value of input.value) {
@@ -4121,11 +4226,11 @@ view.FindSidebar = class extends view.Control {
                     }
                 }
             }
-            for (const node of this._graph.nodes) {
+            for (const node of this._target.nodes) {
                 this._node(node);
             }
             if (this._state.connection) {
-                const outputs = this._signature ? this._signature.outputs : this._graph.inputs;
+                const outputs = this._signature ? this._signature.outputs : this._target.inputs;
                 for (const output of outputs) {
                     if (!output.type || output.type.endsWith('*')) {
                         for (const value of output.value) {
@@ -4282,7 +4387,7 @@ view.Quantization = class {
             return this.value.map((value, index) => `${index.toString().padStart(size, ' ')}: ${value}`).join('\n');
         } else if (this.type === 'annotation') {
             return Array.from(this.value).map(([name, value]) => `${name} = ${value}`).join('\n');
-        } else if (/^q\d_[01k]$/.test(this.type) || /^iq\d_[xsnlm]+$/.test(this.type)) {
+        } else if (/^q\d_[01k]$/.test(this.type) || /^iq\d_[xsnlm]+$/.test(this.type) || this.type === 'mxfp4') {
             return '';
         }
         throw new view.Error(`Unknown quantization type '${this.type}'.`);
@@ -4407,7 +4512,7 @@ view.Documentation = class {
                         target.typeAttr = source.typeAttr;
                     }
                     if (source.typeListAttr !== undefined) {
-                        target.typeListAttr = source.typeAttr;
+                        target.typeListAttr = source.typeListAttr;
                     }
                     if (source.numberAttr !== undefined) {
                         target.numberAttr = source.numberAttr;
@@ -4500,7 +4605,7 @@ view.Formatter = class {
         if (typeof value === 'function') {
             return value();
         }
-        if (value && typeof value === 'bigint') {
+        if (value !== null && value !== undefined && (typeof value === 'bigint' || typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean')) {
             return value.toString();
         }
         if (Number.isNaN(value)) {
@@ -5511,7 +5616,7 @@ metrics.Target = class {
                 const initializers = new Set();
                 if (this._target && Array.isArray(this._target.nodes)) {
                     for (const node of this._target.nodes) {
-                        for (const argument of node.inputs) {
+                        for (const argument of node.inputs || []) {
                             if (argument && Array.isArray(argument.value)) {
                                 for (const value of argument.value) {
                                     if (value && value.initializer) {
@@ -5690,7 +5795,7 @@ view.Context = class {
                     switch (type) {
                         case 'json': {
                             try {
-                                const buffer = stream.peek(Math.min(this.stream.length, 0x1000));
+                                const buffer = stream.peek(Math.min(stream.length, 0x1000));
                                 if (stream.length < 0x7ffff000 &&
                                     (buffer.length < 8 || String.fromCharCode.apply(null, buffer.slice(0, 8)) !== '\x89HDF\r\n\x1A\n') &&
                                     (buffer.some((v) => v === 0x22 || v === 0x5b || v === 0x5d || v === 0x7b || v === 0x7d))) {
@@ -5725,11 +5830,15 @@ view.Context = class {
                         }
                         case 'xml': {
                             try {
-                                const xml = await import('./xml.js');
-                                const reader = xml.TextReader.open(this._stream);
-                                if (reader) {
-                                    const obj = reader.read();
-                                    this._content.set(type, obj);
+                                const buffer = stream.peek(Math.min(this.stream.length, 0x1000));
+                                const content = String.fromCharCode.apply(null, buffer);
+                                if (stream.length < 0x7ffff000 && content.indexOf('<') !== -1 && content.indexOf('</') !== -1) {
+                                    const xml = await import('./xml.js');
+                                    const reader = xml.TextReader.open(this._stream);
+                                    if (reader) {
+                                        const obj = reader.read();
+                                        this._content.set(type, obj);
+                                    }
                                 }
                             } catch {
                                 // continue regardless of error
@@ -6130,7 +6239,7 @@ view.ModelFactoryService = class {
         /* eslint-disable no-control-regex */
         this.register('./message', ['.message', '.netron', '.maxviz']);
         this.register('./pytorch', ['.pt', '.pth', '.ptl', '.pt1', '.pt2', '.pyt', '.pyth', '.pkl', '.pickle', '.h5', '.t7', '.model', '.dms', '.tar', '.ckpt', '.chkpt', '.tckpt', '.bin', '.pb', '.zip', '.nn', '.torchmodel', '.torchscript', '.pytorch', '.ot', '.params', '.trt', '.ff', '.ptmf', '.jit', '.bin.index.json', 'model.json', '.ir', 'serialized_exported_program.json', 'serialized_state_dict.json', 'archive_format'], ['.model', '.pt2'], [/^\x80.\x8a\x0a\x6c\xfc\x9c\x46\xf9\x20\x6a\xa8\x50\x19/]);
-        this.register('./onnx', ['.onnx', '.onnx.data', '.onn', '.pb', '.onnxtxt', '.pbtxt', '.prototxt', '.txt', '.model', '.pt', '.pth', '.pkl', '.ort', '.ort.onnx', '.ngf', '.json', '.bin', 'onnxmodel'], [], [/^\x08[\x00-\x10]\x12[\x00-\x20]\w\w/, /^\x08[\x00-\x10]\x12\x00\x1A/, /^\x08[\x00-\x10]\x3A/, /^\s*ir_version:\s\d+/, /^....ORTM/]);
+        this.register('./onnx', ['.onnx', '.onnx.data', '.onnx.meta', '.onn', '.pb', '.onnxtxt', '.pbtxt', '.prototxt', '.txt', '.model', '.pt', '.pth', '.pkl', '.ort', '.ort.onnx', '.ngf', '.json', '.bin', 'onnxmodel'], [], [/^\x08[\x00-\x10]\x12[\x00-\x20]\w\w/, /^\x08[\x00-\x10]\x12\x00\x1A/, /^\x08[\x00-\x10]\x3A/, /^\s*ir_version:\s\d+/, /^....ORTM/]);
         this.register('./tflite', ['.tflite', '.lite', '.tfl', '.bin', '.pb', '.tmfile', '.h5', '.model', '.json', '.txt', '.dat', '.nb', '.ckpt', '.onnx'], [], [/^....TFL3/]);
         this.register('./mxnet', ['.json', '.params'], ['.mar']);
         this.register('./coreml', ['.mlmodel', '.bin', 'manifest.json', 'metadata.json', 'featuredescriptions.json', '.pb', '.pbtxt', '.mil'], ['.mlpackage', '.mlmodelc']);
@@ -6140,6 +6249,7 @@ view.ModelFactoryService = class {
         this.register('./tf', ['.pb', '.meta', '.pbtxt', '.prototxt', '.txt', '.pt', '.json', '.index', '.ckpt', '.graphdef', '.pbmm', /.data-[0-9][0-9][0-9][0-9][0-9]-of-[0-9][0-9][0-9][0-9][0-9]$/, /^events.out.tfevents./, /^.*group\d+-shard\d+of\d+(\.bin)?$/], ['.zip']);
         this.register('./tensorrt', ['.trt', '.trtmodel', '.engine', '.model', '.txt', '.uff', '.pb', '.tmfile', '.onnx', '.pth', '.dnn', '.plan', '.pt', '.dat', '.bin'], [], [/^ptrt/, /^ftrt/]);
         this.register('./keras', ['.h5', '.hd5', '.hdf5', '.keras', '.json', '.cfg', '.model', '.pb', '.pth', '.weights', '.pkl', '.lite', '.tflite', '.ckpt', '.pb', 'model.weights.npz', /^.*group\d+-shard\d+of\d+(\.bin)?$/], ['.zip'], [/^\x89HDF\r\n\x1A\n/]);
+        this.register('./safetensors', ['.safetensors', '.safetensors.index.json']);
         this.register('./numpy', ['.npz', '.npy', '.pkl', '.pickle', '.model', '.model2', '.mge', '.joblib', '']);
         this.register('./lasagne', ['.pkl', '.pickle', '.joblib', '.model', '.pkl.z', '.joblib.z']);
         this.register('./lightgbm', ['.txt', '.pkl', '.model']);
@@ -6183,7 +6293,6 @@ view.ModelFactoryService = class {
         this.register('./mlir', ['.mlir', '.mlir.txt', '.mlirbc']);
         this.register('./sentencepiece', ['.model']);
         this.register('./hailo', ['.hn', '.har', '.metadata.json']);
-        this.register('./safetensors', ['.safetensors', '.safetensors.index.json']);
         this.register('./tvm', ['.json', '.params']);
         this.register('./dot', ['.dot'], [], [/^\s*(\/\*[\s\S]*?\*\/|\/\/.*|#.*)?\s*digraph\s*([A-Za-z][A-Za-z0-9-_]*|".*?")?\s*{/m]);
         this.register('./catboost', ['.cbm']);
@@ -6191,6 +6300,7 @@ view.ModelFactoryService = class {
         this.register('./qnn', ['.json', '.bin', '.serialized', '.dlc']);
         this.register('./kann', ['.kann', '.bin', '.kgraph'], [], [/^....KaNN/]);
         this.register('./xgboost', ['.xgb', '.xgboost', '.json', '.model', '.bin', '.txt'], [], [/^{L\x00\x00/, /^binf/, /^bs64/, /^\s*booster\[0\]:/]);
+        this.register('./transformers', ['.json']);
         this.register('', ['.cambricon', '.vnnmodel', '.nnc']);
         /* eslint-enable no-control-regex */
     }
@@ -6287,6 +6397,18 @@ view.ModelFactoryService = class {
                 throw new view.Error("Archive contains no model files.");
             }
         }
+        const regex = async() => {
+            const entries = [
+                { name: 'Unity metadata', value: /fileFormatVersion:/ },
+            ];
+            const buffer = stream.peek(Math.min(4096, stream.length));
+            const content = String.fromCharCode.apply(null, buffer);
+            for (const entry of entries) {
+                if (content.match(entry.value) && (!entry.identifier || context.identifier.match(entry.identifier))) {
+                    throw new view.Error(`Invalid file content. File contains ${entry.name}.`);
+                }
+            }
+        };
         const json = async () => {
             const obj = await context.peek('json');
             if (obj) {
@@ -6305,6 +6427,7 @@ view.ModelFactoryService = class {
                     { name: 'NuGet assets', tags: ['version', 'targets', 'packageFolders'] },
                     { name: 'NuGet data', tags: ['format', 'restore', 'projects'] },
                     { name: 'NPM package', tags: ['name', 'version', 'dependencies'] },
+                    { name: 'NPM package lock data', tags: ['name', 'version', 'lockfileVersion'] },
                     { name: 'NetworkX adjacency_data', tags: ['directed', 'graph', 'nodes'] },
                     { name: 'Waifu2x data', tags: ['name', 'arch_name', 'channels'] },
                     { name: 'Waifu2x data', tags: ['[].nInputPlane', '[].nOutputPlane', '[].weight', '[].bias'] },
@@ -6318,18 +6441,6 @@ view.ModelFactoryService = class {
                     { name: 'Trace Event data', tags: ['traceEvents'] },
                     { name: 'Trace Event data', tags: ['[].pid', '[].ph'] },
                     { name: 'Diffusers configuration', tags: ['_class_name', '_diffusers_version'] },
-                    { name: 'Transformers configuration', tags: ['architectures', 'model_type'] }, // https://huggingface.co/docs/transformers/en/create_a_model
-                    { name: 'Transformers generation configuration', tags: ['transformers_version'] },
-                    { name: 'Transformers tokenizer configuration', tags: ['tokenizer_class'] },
-                    { name: 'Transformers tokenizer configuration', tags: ['bos_token', 'eos_token', 'unk_token'] },
-                    { name: 'Transformers tokenizer configuration', tags: ['bos_token', 'eos_token', 'pad_token'] },
-                    { name: 'Transformers tokenizer configuration', tags: ['additional_special_tokens'] },
-                    { name: 'Transformers tokenizer configuration', tags: ['special_tokens_map_file'] },
-                    { name: 'Transformers tokenizer configuration', tags: ['full_tokenizer_file'] },
-                    { name: 'Transformers vocabulary data', tags: ['<|im_start|>'] },
-                    { name: 'Transformers vocabulary data', tags: ['<|endoftext|>'] },
-                    { name: 'Transformers preprocessor configuration', tags: ['crop_size', 'do_center_crop', 'image_mean', 'image_std', 'do_resize'] },
-                    { name: 'Tokenizers data', tags: ['version', 'added_tokens', 'model'] }, // https://github.com/huggingface/tokenizers/blob/main/tokenizers/src/tokenizer/serialization.rs
                     { name: 'Tokenizer data', tags: ['<eos>', '<bos>'] },
                     { name: 'Jupyter Notebook data', tags: ['cells', 'nbformat'] },
                     { name: 'Kaggle credentials', tags: ['username','key'] },
@@ -6340,6 +6451,7 @@ view.ModelFactoryService = class {
                     { name: 'GuitarML SmartAmp model data', tags: ['activation', 'output_channels', 'input_channels', 'residual_channels'] },
                     { name: 'Keras configuration data', tags: ['floatx', 'epsilon', 'backend'] },
                     { name: 'PIMCOMP-NN model data', tags: ['node_list', 'reshape_info'] },
+                    { name: 'AIMET encodings', tags: ['activation_encodings'] },
                 ];
                 const match = (obj, tag) => {
                     if (tag.startsWith('[].')) {
@@ -6544,6 +6656,7 @@ view.ModelFactoryService = class {
             }
             throw new view.Error("Unsupported file directory.");
         };
+        await regex();
         await json();
         await pbtxt();
         await pb();
@@ -6637,8 +6750,8 @@ view.ModelFactoryService = class {
                         }
                         delete context.value;
                         if (type) {
-                            matches = matches.filter((match) => !factory.filter || factory.filter(context, match.type));
-                            if (matches.every((match) => !match.factory.filter || match.factory.filter(match, context.type))) {
+                            matches = matches.filter((match) => !factory.filter || factory.filter(context, match));
+                            if (matches.every((match) => !match.factory.filter || match.factory.filter(match, context))) {
                                 context.factory = factory;
                                 matches.push(context);
                             }
@@ -6760,7 +6873,6 @@ view.ModelFactoryService = class {
                 { name: 'undocumented HALCON model', value: /^HDLMODEL/ },
                 { name: 'undocumented license data', value: /^This model and the software may not be used or distributed in any manner except as authorized under a valid written agreemen/ },
                 { name: 'undocumented NNC data', value: /^(\xC0|\xBC)\x0F\x00\x00ENNC/ },
-                { name: 'Unity metadata', value: /^fileFormatVersion:/ },
                 { name: 'V8 context snapshot', value: /^.\x00\x00\x00.\x00\x00\x00/, identifier: /^v8_context_snapshot\.bin/ },
                 { name: 'V8 natives blob', value: /^./, identifier: /^natives_blob\.bin/ },
                 { name: 'V8 snapshot', value: /^.\x00\x00\x00.\x00\x00\x00/, identifier: /^snapshot_blob\.bin/ },

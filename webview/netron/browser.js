@@ -15,7 +15,7 @@ browser.Host = class {
         };
         this._meta = {};
         for (const element of Array.from(this._document.getElementsByTagName('meta'))) {
-            if (element.name !== undefined && element.content !== undefined) {
+            if (element.name !== undefined && element.name !== '' && element.content !== undefined) {
                 this._meta[element.name] = this._meta[element.name] || [];
                 this._meta[element.name].push(element.content);
             }
@@ -31,7 +31,7 @@ browser.Host = class {
             repository: this._element('logo-github').getAttribute('href'),
             menu: true
         };
-        if (this.version && !/^\d\.\d\.\d$/.test(this.version)) {
+        if (this.version && !/^\d+\.\d+\.\d+$/.test(this.version)) {
             throw new Error('Invalid version.');
         }
     }
@@ -269,7 +269,7 @@ browser.Host = class {
     }
 
     async request(file, encoding, base) {
-        const url = base ? (`${base}/${file}`) : this._url(file);
+        const url = base ? `${base}/${file}` : this._url(file);
         if (base === null) {
             this._requests = this._requests || new Map();
             const key = `${url}:${encoding}`;
@@ -345,6 +345,11 @@ browser.Host = class {
     }
 
     async _request(url, headers, encoding, callback, timeout) {
+        if (!url.startsWith('data:')) {
+            const date = new Date().getTime();
+            const separator = (/\?/).test(url) ? '&' : '?';
+            url = `${url}${separator}cb=${date}`;
+        }
         return new Promise((resolve, reject) => {
             const request = new XMLHttpRequest();
             if (!encoding) {
@@ -417,7 +422,6 @@ browser.Host = class {
     }
 
     async _openModel(url, identifier, name) {
-        url = url.startsWith('data:') ? url : `${url + ((/\?/).test(url) ? '&' : '?')}cb=${(new Date()).getTime()}`;
         this._view.show('welcome spinner');
         let context = null;
         try {
@@ -749,7 +753,7 @@ browser.FileStream = class {
         length = length === undefined ? this._length - this._position : length;
         if (length < 0x10000000) {
             const position = this._fill(length);
-            return this._buffer.subarray(position, position + length);
+            return this._buffer.slice(position, position + length);
         }
         const position = this._start + this._position;
         this.skip(length);
@@ -803,16 +807,11 @@ browser.Context = class {
         this._host = host;
         this._name = name;
         this._stream = stream;
+        const parts = url.split('?')[0].split('/');
+        this._identifier = parts.pop();
+        this._base = parts.join('/');
         if (identifier) {
             this._identifier = identifier;
-            this._base = url;
-            if (this._base.endsWith('/')) {
-                this._base.substring(0, this._base.length - 1);
-            }
-        } else {
-            const parts = url.split('?')[0].split('/');
-            this._identifier = parts.pop();
-            this._base = parts.join('/');
         }
     }
 

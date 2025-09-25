@@ -276,7 +276,7 @@ app.Application = class {
             case 'about': this._about(); break;
             default: {
                 const view = this._views.get(window) || this._views.activeView;
-                if (view) {
+                if (view && view.get(`${command}.enabled`) !== false) {
                     view.execute(command, value || {});
                 }
                 this._menu.update();
@@ -507,10 +507,10 @@ app.Application = class {
                     },
                     { type: 'separator' },
                     {
-                        id: 'view.reset-zoom',
+                        id: 'view.zoom-reset',
                         label: 'Actual &Size',
                         accelerator: 'Shift+Backspace',
-                        click: async () => await this.execute('reset-zoom', null),
+                        click: async () => await this.execute('zoom-reset', null),
                     },
                     {
                         id: 'view.zoom-in',
@@ -579,7 +579,7 @@ app.Application = class {
                 enabled: (view) => view && view.path ? true : false
             });
             commandTable.set('edit.copy', {
-                enabled: (view) => view && (view.path || view.get('can-copy')) ? true : false
+                enabled: (view) => view && (view.path || view.get('copy.enabled')) ? true : false
             });
             commandTable.set('edit.paste', {
                 enabled: (view) => view && view.path ? true : false
@@ -613,14 +613,14 @@ app.Application = class {
             commandTable.set('view.reload', {
                 enabled: (view) => view && view.path ? true : false
             });
-            commandTable.set('view.reset-zoom', {
-                enabled: (view) => view && view.path ? true : false
+            commandTable.set('view.zoom-reset', {
+                enabled: (view) => view && view.path && view.get('zoom-reset.enabled') ? true : false
             });
             commandTable.set('view.zoom-in', {
-                enabled: (view) => view && view.path ? true : false
+                enabled: (view) => view && view.path && view.get('zoom-in.enabled') ? true : false
             });
             commandTable.set('view.zoom-out', {
-                enabled: (view) => view && view.path ? true : false
+                enabled: (view) => view && view.path && view.get('zoom-out.enabled') ? true : false
             });
             commandTable.set('view.show-properties', {
                 enabled: (view) => view && view.path ? true : false
@@ -663,6 +663,7 @@ app.View = class {
             height: size.height > 768 ? 768 : size.height,
             webPreferences: {
                 preload: path.join(dirname, 'desktop.mjs'),
+                contextIsolation: true,
                 nodeIntegration: true,
                 enableDeprecatedPaste: true
             }
@@ -693,7 +694,7 @@ app.View = class {
         this._window.on('unmaximize', () => this.state());
         this._window.on('enter-full-screen', () => this.state('enter-full-screen'));
         this._window.on('leave-full-screen', () => this.state('leave-full-screen'));
-        this._window.webContents.on('did-finish-load', () => {
+        this._window.webContents.once('did-finish-load', () => {
             this._didFinishLoad = true;
         });
         this._window.webContents.setWindowOpenHandler((detail) => {
@@ -709,7 +710,13 @@ app.View = class {
         if (owner.application.environment.titlebar && process.platform !== 'darwin') {
             this._window.removeMenu();
         }
-        this._loadURL();
+        const pathname = path.join(dirname, 'index.html');
+        let content = fs.readFileSync(pathname, 'utf-8');
+        content = content.replace(/<\s*script[^>]*>[\s\S]*?(<\s*\/script[^>]*>|$)/ig, '');
+        const data = `data:text/html;charset=utf-8,${encodeURIComponent(content)}`;
+        this._window.loadURL(data, {
+            baseURLForDataURL: url.pathToFileURL(pathname).toString()
+        });
     }
 
     get window() {
@@ -720,29 +727,24 @@ app.View = class {
         return this._path;
     }
 
-    open(path) {
+    async open(path) {
         this._openPath = path;
         const location = app.Application.location(path);
-        if (this._didFinishLoad) {
-            this._window.webContents.send('open', location);
-        } else {
-            this._window.webContents.on('did-finish-load', () => {
-                this._window.webContents.send('open', location);
-            });
-            this._loadURL();
-        }
-    }
-
-    _loadURL() {
-        const dirname = path.dirname(url.fileURLToPath(import.meta.url));
-        const pathname = path.join(dirname, 'index.html');
-        let content = fs.readFileSync(pathname, 'utf-8');
-        content = content.replace(/<\s*script[^>]*>[\s\S]*?(<\s*\/script[^>]*>|$)/ig, '');
-        const data = `data:text/html;charset=utf-8,${encodeURIComponent(content)}`;
-        const options = {
-            baseURLForDataURL: url.pathToFileURL(pathname).toString()
-        };
-        this._window.loadURL(data, options);
+        await new Promise((resolve) => {
+            if (this._didFinishLoad) {
+                resolve();
+            } else {
+                this._window.webContents.once('did-finish-load', resolve);
+            }
+        });
+        await new Promise((resolve) => {
+            if (this._window.isVisible()) {
+                resolve();
+            } else {
+                this._window.once('ready-to-show', resolve);
+            }
+        });
+        this._window.webContents.send('open', location);
     }
 
     restore() {
@@ -964,6 +966,7 @@ app.ViewCollection = class {
 app.ConfigurationService = class {
 
     constructor() {
+        this._content = { 'recents': [] };
         const dir = electron.app.getPath('userData');
         if (dir && dir.length > 0) {
             this._file = path.join(dir, 'configuration.json');
@@ -971,7 +974,6 @@ app.ConfigurationService = class {
     }
 
     open() {
-        this._content = { 'recents': [] };
         if (this._file && fs.existsSync(this._file)) {
             const data = fs.readFileSync(this._file, 'utf-8');
             if (data) {

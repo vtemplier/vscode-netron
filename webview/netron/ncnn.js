@@ -99,8 +99,8 @@ ncnn.ModelFactory = class {
         return null;
     }
 
-    filter(context, type) {
-        return (context.type !== 'ncnn.model' && context.type !== 'ncnn.model.bin') || type !== 'ncnn.weights';
+    filter(context, match) {
+        return (context.type !== 'ncnn.model' && context.type !== 'ncnn.model.bin') || match.type !== 'ncnn.weights';
     }
 
     async open(context) {
@@ -191,7 +191,7 @@ ncnn.Model = class {
 
     constructor(metadata, format, param, blobs) {
         this.format = format === 'pnnx' ? 'PNNX' : 'ncnn';
-        this.graphs = [new ncnn.Graph(metadata, format, param, blobs)];
+        this.modules = [new ncnn.Graph(metadata, format, param, blobs)];
     }
 };
 

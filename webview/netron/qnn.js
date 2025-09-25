@@ -7,7 +7,7 @@ qnn.ModelFactory = class {
 
     async match(context) {
         const obj = await context.peek('json');
-        if (obj && obj['model.cpp'] && obj.graph) {
+        if (obj && obj['model.cpp'] !== undefined && obj.graph) {
             return context.set('qnn.json', obj);
         }
         const entries = await context.peek('tar');
@@ -81,7 +81,7 @@ qnn.Model = class {
         if (obj.copyright_str) {
             this.metadata.push(new qnn.Argument('License', obj.copyright_str));
         }
-        this.graphs = [new qnn.Graph(metadata, obj.graph, weights)];
+        this.modules = [new qnn.Graph(metadata, obj.graph, weights)];
     }
 };
 

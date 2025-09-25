@@ -5,7 +5,7 @@
 <meta name="description" content="Visualizer for neural network, deep learning and machine learning models." />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
 <meta http-equiv="Content-Security-Policy" content="default-src %webview_cspSource%; style-src %webview_cspSource% 'unsafe-inline'; img-src %webview_cspSource% https:; script-src %webview_cspSource% 'nonce-%nonce%'; script-src-elem %webview_cspSource% 'nonce-%nonce%'; connect-src %webview_cspSource% https:; frame-src https:;">
-<meta name="version" content="8.4.4">
+<meta name="version" content="8.6.5">
 <meta name="date" content="">
 <title>Netron</title>
 <link rel="stylesheet" nonce="%nonce%" href="%grapherSheetPath%">
@@ -22,12 +22,12 @@ body { touch-action: none; overflow: hidden; width: 100%; height: 100%; margin: 
 button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI", "Ubuntu", "Droid Sans", sans-serif, "PingFang SC"; }
 .center { position: absolute; margin: auto; top: 0; right: 0; bottom: 0; left: 0; user-select: none; -webkit-user-select: none; -moz-user-select: none; }
 .select { user-select: text; -webkit-user-select: text; -moz-user-select: text; }
-.graph { display: flex; height: 100%; width: 100%; overflow: auto; outline: none; touch-action: pan-x pan-y; }
+.target { display: flex; height: 100%; width: 100%; overflow: auto; outline: none; touch-action: pan-x pan-y; }
 .canvas { margin: auto; flex-shrink: 0; text-rendering: geometricPrecision; user-select: none; -webkit-user-select: none; -moz-user-select: none; }
 .open-file-dialog { display: none; }
 .default { background-color: #ffffff; }
 .default .logo { display: none; }
-.default .graph { display: flex; opacity: 1; }
+.default .target { display: flex; opacity: 1; }
 .default .toolbar { display: flex; }
 .toolbar { display: flex; align-items: center; position: absolute; bottom: 10px; left: 10px; padding: 0; margin: 0; user-select: none; -webkit-user-select: none; -moz-user-select: none; }
 .toolbar button:focus { outline: 0; }
@@ -52,6 +52,9 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 .toolbar-icon:hover .fill { fill: #000000; }
 .message { display: none; opacity: 0; position: absolute; top: 0; left: 0; width: 100%; height: 100%; flex-direction: column; justify-content: flex-start; }
 .message-text { display: inline; text-align: center; width: 562px; font-size: 13px; line-height: 20px; margin-top: 50vh; padding-top: 56px; padding-bottom: 20px; margin-left: auto; margin-right: auto; user-select: text; -webkit-user-select: text; -moz-user-select: text; }
+.welcome .message-text a { text-decoration: none; color: #666666; }
+.welcome .message-text a:visited { color: inherit; }
+.welcome .message-text a:hover { color: #242424; text-decoration: underline; }
 .message-button { display: inline; text-align: center; width: 125px; margin-left: auto; margin-right: auto; }
 .logo-text { top: -57px; width: 582px; transition: 0.1s; }
 .logo-name { top: -170px; width: 582px; transition: 0.1s; }
@@ -76,7 +79,7 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 .welcome { background-color: #ececec; color: #242424; }
 .welcome .message-text { display: none; opacity: 0; }
 .welcome .message-button { display: none; opacity: 0; }
-.welcome .graph { display: none; opacity: 0; }
+.welcome .target { display: none; opacity: 0; }
 .welcome .menu { background-color: #ffffff; }
 .welcome.spinner .logo-spinner { display: block; -webkit-animation: orbit 0.5s infinite linear; animation: orbit 0.5s infinite linear; cursor: wait; }
 .welcome.spinner .menu-button { display: none; }
@@ -86,7 +89,7 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 .notification .message-text { display: inline; opacity: 1; }
 .notification .message-button { display: inline; opacity: 1; }
 .alert { background-color: #ececec; color: #242424; }
-.alert .graph { display: none; opacity: 0; }
+.alert .target { display: none; opacity: 0; }
 .alert .toolbar { display: none; opacity: 0; }
 .alert .menu { display: none; opacity: 0; }
 .alert .logo { display: none; opacity: 0; }
@@ -135,13 +138,13 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 .welcome.spinner .logo-spinner-stroke { stroke: #ececec; }
 .welcome.spinner .logo-name { display: none; }
 .welcome.spinner .open-file-button { display: none; }
-.welcome.spinner .graph { display: flex; opacity: 0; }
+.welcome.spinner .target { display: flex; opacity: 0; }
 .welcome .notification .logo-name { display: none; }
 .welcome .toolbar { display: none; }
 @media (prefers-color-scheme: dark) {
 :root { color-scheme: dark; }
 .default { background-color: #404040; }
-.graph { background-color: #404040; }
+.target { background-color: #404040; }
 .welcome { background-color: #1e1e1e; color: #888888; }
 .alert { background-color: #1e1e1e; color: #888888; }
 .logo-stroke { stroke: #888888; }
@@ -156,6 +159,9 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 .about .logo { background-color: #1e1e1e; color: #888888; }
 .about a { color: #c6c6c6; }
 .about a:hover { color: #565656; }
+.welcome .message-text a { color: #c6c6c6; }
+.welcome .message-text a:visited { color: #c6c6c6; }
+.welcome .message-text a:hover { color: #565656; }
 .toolbar-icon .border { stroke: #333333; }
 .toolbar-icon .stroke { stroke: #aaaaaa; }
 .toolbar-icon .fill { fill: #aaaaaa; }
@@ -303,8 +309,7 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 </style>
 </head>
 <body class="welcome spinner">
-<div id="graph" class="graph" tabindex="0">
-    <svg id="canvas" class="canvas" preserveaspectratio="xMidYMid meet" width="100%" height="100%"></svg>
+<div id="target" class="target" tabindex="0">
 </div>
 <div id="sidebar" class="sidebar">
     <h1 id="sidebar-title" class="sidebar-title"></h1>
@@ -356,7 +361,7 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
             <line class="stroke" x1="78" y1="78" x2="82" y2="82" stroke-width="8" stroke-linecap="square"></line>
         </svg>
     </button>
-    <button id="sidebar-document-button" class="toolbar-button" title="Model Properties">
+    <button id="sidebar-model-button" class="toolbar-button" title="Model Properties">
         <svg class="toolbar-icon" viewbox="0 0 100 100">
             <rect class="border" x="12" y="12" width="76" height="76" rx="16" ry="16" stroke-width="8"></rect>
             <line class="border" x1="28" y1="37" x2="32" y2="37" stroke-width="8" stroke-linecap="round" stroke="#fff"></line>
@@ -377,17 +382,11 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
     <button id="sidebar-target-button" class="toolbar-button" title="Target Properties">
         <svg class="toolbar-icon" viewBox="0 0 100 100">
             <rect class="border" x="12" y="12" width="76" height="76" rx="16" ry="16" stroke-width="8"></rect>
-            <circle class="border" cx="35" cy="50" r="8" stroke-width="8"></circle>
-            <circle class="border" cx="65" cy="35" r="8" stroke-width="8"></circle>
-            <circle class="border" cx="65" cy="65" r="8" stroke-width="8"></circle>
-            <line class="border" x1="41.6" y1="46.8" x2="58.4" y2="38.2" stroke-width="8" />
-            <line class="border" x1="41.6" y1="53.2" x2="58.4" y2="61.8" stroke-width="8" />
+            <circle class="border" cx="50" cy="50" r="18" stroke-width="8"></circle>
+            <circle class="border" cx="50" cy="50" r="3" stroke-width="8"></circle>
             <rect class="stroke" x="12" y="12" width="76" height="76" rx="16" ry="16" stroke-width="4"></rect>
-            <circle class="stroke fill" cx="35" cy="50" r="8" stroke-width="4"></circle>
-            <circle class="stroke fill" cx="65" cy="35" r="8" stroke-width="4"></circle>
-            <circle class="stroke fill" cx="65" cy="65" r="8" stroke-width="4"></circle>
-            <line class="stroke" x1="41.6" y1="46.8" x2="58.4" y2="38.2" stroke-width="4" />
-            <line class="stroke" x1="41.6" y1="53.2" x2="58.4" y2="61.8" stroke-width="4" />
+            <circle class="stroke" cx="50" cy="50" r="18" stroke-width="4"></circle>
+            <circle class="stroke fill" cx="50" cy="50" r="3" stroke-width="4"></circle>
         </svg>
     </button>
     <div id="toolbar-navigator" class="toolbar-select">
@@ -527,7 +526,7 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
         <div style="height: 30px; text-align: center;">Version <span id="version" class="select">{version}</span></div>
         <div style="height: 30px; text-align: center;">Copyright &copy; <a href="https://www.lutzroeder.com" target="blank_">Lutz Roeder</a></div>
     </div>
-    <a id="logo-github" class="center logo-github" href="https://github.com/lutzroeder/netron" target="blank_">
+    <a id="logo-github" class="center logo-github" href="https://github.com/vtemplier/vscode-netron" target="blank_">
         <svg viewbox="0 0 438.549 438.549">
             <path class="logo-fill" d="M409.132,114.573c-19.608-33.596-46.205-60.194-79.798-79.8C295.736,15.166,259.057,5.365,219.271,5.365
                 c-39.781,0-76.472,9.804-110.063,29.408c-33.596,19.605-60.192,46.204-79.8,79.8C9.803,148.168,0,184.854,0,224.63

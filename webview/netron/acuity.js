@@ -5,7 +5,7 @@ acuity.ModelFactory = class {
 
     async match(context) {
         const obj = await context.peek('json');
-        if (obj && obj.MetaData && obj.Layers) {
+        if (obj && obj.MetaData && obj.Layers && Object.keys(obj).length < 256) {
             return context.set('acuity', obj);
         }
         return null;
@@ -23,7 +23,7 @@ acuity.Model = class {
         this.name = model.MetaData.Name;
         this.format = `Acuity v${model.MetaData.AcuityVersion}`;
         this.runtime = model.MetaData.Platform;
-        this.graphs = [new acuity.Graph(metadata, model, data, quantization)];
+        this.modules = [new acuity.Graph(metadata, model, data, quantization)];
     }
 };
 

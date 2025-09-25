@@ -18,7 +18,8 @@ onnx.ModelFactory = class {
                 onnx.TextReader,
                 onnx.JsonReader,
                 onnx.PickleReader,
-                onnx.DataReader
+                onnx.DataReader,
+                onnx.MetaReader
             ];
             for (const entry of entries) {
                 /* eslint-disable no-await-in-loop */
@@ -39,8 +40,8 @@ onnx.ModelFactory = class {
         return new onnx.Model(metadata, target);
     }
 
-    filter(context, type) {
-        return context.type !== 'onnx.proto' || (type !== 'onnx.data' && type !== 'dot');
+    filter(context, match) {
+        return context.type !== 'onnx.proto' || (match.type !== 'onnx.data' && match.type !== 'onnx.meta' && match.type !== 'dot');
     }
 };
 
@@ -48,7 +49,7 @@ onnx.Model = class {
 
     constructor(metadata, target) {
         const model = target.model;
-        this._graphs = [];
+        this._modules = [];
         this._format = target.format;
         this._producer = model.producer_name && model.producer_name.length > 0 ? model.producer_name + (model.producer_version && model.producer_version.length > 0 ? ` ${model.producer_version}` : '') : null;
         this._domain = model.domain;
@@ -118,7 +119,7 @@ onnx.Model = class {
         const context = new onnx.Context.Model(metadata, target.locations, imageFormat, imports, model.graph, model.functions);
         const graph = context.graph(null);
         if (graph) {
-            this._graphs.push(graph);
+            this._modules.push(graph);
         }
         this._functions = context.functions;
     }
@@ -155,8 +156,8 @@ onnx.Model = class {
         return this._metadata;
     }
 
-    get graphs() {
-        return this._graphs;
+    get modules() {
+        return this._modules;
     }
 
     get functions() {
@@ -2830,6 +2831,39 @@ onnx.DataReader = class {
         this.identifier = identifier;
         this.locations = new Map();
         this.locations.set(identifier, context.stream);
+    }
+
+    async read() {
+        const file = this.identifier.substring(0, this.identifier.length - 5);
+        const context = await this.context.fetch(file);
+        const reader = new onnx.ProtoReader(context, 'binary', 'model');
+        reader.locations = this.locations;
+        await reader.read();
+        this.format = reader.format;
+        this.model = reader.model;
+    }
+};
+
+onnx.MetaReader = class {
+
+    static async open(context) {
+        const identifier = context.identifier.toLowerCase();
+        if (identifier.endsWith('.onnx.meta')) {
+            const stream = context.stream;
+            const buffer = context.stream.peek(Math.min(stream.length, 32));
+            const content = String.fromCharCode.apply(null, buffer);
+            if (content.startsWith('fileFormatVersion:') || content.startsWith('- !<AssetImportMetadata/')) {
+                return new onnx.MetaReader(context, identifier);
+            }
+        }
+        return null;
+    }
+
+    constructor(context, identifier) {
+        this.name = 'onnx.meta';
+        this.context = context;
+        this.identifier = identifier;
+        this.locations = new Map();
     }
 
     async read() {

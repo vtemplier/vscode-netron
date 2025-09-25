@@ -32,11 +32,11 @@ executorch.Model = class {
 
     constructor(target) {
         this.format = `ExecuTorch v${target.program.version}`;
-        this.graphs = [];
+        this.modules = [];
         for (const plan of target.program.execution_plan) {
             for (const chain of plan.chains) {
                 const graph = new executorch.Graph(target, plan, chain);
-                this.graphs.push(graph);
+                this.modules.push(graph);
             }
         }
     }
@@ -90,7 +90,7 @@ executorch.Graph = class {
                     const list = val.items.map((index) => plan.values[index].val.int_val);
                     values.set(index, { type: 'int64[]', value: list });
                 } else if (val instanceof executorch_flatbuffer.DoubleList) {
-                    throw new executorch.Error('executorch_flatbuffer.DoubleList not implemented.');
+                    values.set(index, { type: 'float64[]', value: Array.from(val.items) });
                 } else if (val instanceof executorch_flatbuffer.BoolList) {
                     throw new executorch.Error('executorch_flatbuffer.BoolList not implemented.');
                 } else if (val instanceof executorch_flatbuffer.TensorList) {
@@ -284,10 +284,14 @@ executorch.Tensor = class {
         } else if (tensor.allocation_info === null) {
             const constant_segment = program.constant_segment;
             const data_segment = program.segments[constant_segment.segment_index];
-            const offset = constant_segment.offsets[data_buffer_idx].toNumber();
-            const next = data_buffer_idx + 1 < constant_segment.offsets.length ? constant_segment.offsets[data_buffer_idx + 1].toNumber() : data_segment.size.toNumber();
+            const offset = constant_segment.offsets[data_buffer_idx];
+            let next = data_segment.size;
+            if (data_buffer_idx + 1 < constant_segment.offsets.length) {
+                next = constant_segment.offsets[data_buffer_idx + 1];
+            }
             const size = next - offset;
-            this.values = target.blob(data_segment.offset.toNumber() + offset, size);
+            const position = data_segment.offset + offset;
+            this.values = target.blob(position.toNumber(), size.toNumber());
             this.encoding = '<';
         } else {
             throw new executorch.Error('Tensor allocation info not implemented.');
@@ -317,6 +321,10 @@ executorch.Reader = class {
         this.metadata.register(this.execution);
         const executorch_flatbuffer = executorch.schema.executorch_flatbuffer;
         this.program = executorch_flatbuffer.Program.create(this.reader);
+        this.named_data = new Map();
+        if (this.program.named_data) {
+            this.named_data = new Map(this.program.named_data.map((entry) => [entry.key, entry.segment_index]));
+        }
         this.reader = await context.read('binary');
         if (this.reader.length >= 32) {
             this.reader.seek(8);
@@ -324,8 +332,8 @@ executorch.Reader = class {
             if (magic === 'eh00') {
                 this.extended_file_header = {
                     length: this.reader.uint32(),
-                    program_size: this.reader.uint64().toNumber(),
-                    segment_base_offset: this.reader.uint64().toNumber(),
+                    program_size: this.reader.uint64(),
+                    segment_base_offset: this.reader.uint64(),
                 };
             }
             this.reader.seek(0);
@@ -347,7 +355,9 @@ executorch.Reader = class {
                             }
                             case executorch_flatbuffer.DataLocation.SEGMENT: {
                                 const segment = this.program.segments[delegate.processed.index];
-                                data = this.blob(segment.offset.toNumber(), segment.size.toNumber());
+                                const offset = segment.offset;
+                                const size = segment.size;
+                                data = this.blob(offset.toNumber(), size.toNumber());
                                 break;
                             }
                             default: {
@@ -382,10 +392,24 @@ executorch.Reader = class {
 
     blob(offset, size) {
         if (this.extended_file_header) {
-            this.reader.seek(this.extended_file_header.segment_base_offset + offset);
+            const segment_base_offset = this.extended_file_header.segment_base_offset;
+            this.reader.seek(segment_base_offset.toNumber() + offset);
             const data = this.reader.read(size);
             this.reader.seek(0);
             return data;
+        }
+        return null;
+    }
+
+    segment(key) {
+        if (this.named_data.has(key)) {
+            const segment_index = this.named_data.get(key);
+            if (segment_index >= 0 && segment_index < this.program.segments.length) {
+                const segment = this.program.segments[segment_index];
+                const offset = segment.offset;
+                const size = segment.size;
+                return this.blob(offset.toNumber(), size.toNumber());
+            }
         }
         return null;
     }
@@ -443,8 +467,14 @@ xnnpack.Reader = class {
 
     constant(idx) {
         const constant_data = this.graph.constant_data[idx];
-        this.reader.seek(this.constants.offset + constant_data.offset.toNumber());
-        const data = this.reader.read(constant_data.size.toNumber());
+        const named_key = constant_data.named_key;
+        if (named_key) {
+            return this.target.segment(named_key);
+        }
+        const offset = constant_data.offset;
+        const size = constant_data.size;
+        this.reader.seek(this.constants.offset + offset.toNumber());
+        const data = this.reader.read(size.toNumber());
         this.reader.seek(0);
         return data;
     }
@@ -684,8 +714,10 @@ vulkan.Reader = class {
 
     constant(id) {
         const constant = this.graph.constants[id];
-        this.reader.seek(this.constants.offset + constant.offset.toNumber());
-        const data = this.reader.read(constant.length.toNumber());
+        const offset = constant.offset;
+        const length = constant.length;
+        this.reader.seek(this.constants.offset + offset.toNumber());
+        const data = this.reader.read(length.toNumber());
         this.reader.seek(0);
         return data;
     }
@@ -802,7 +834,7 @@ vulkan.Value = class Value {
 vulkan.TensorType = class {
 
     constructor(tensor) {
-        const types = ['bool', 'uint8', 'int8', 'int32', 'float16', 'float32'];
+        const types = ['bool', 'uint8', 'int8', 'int32', 'float16', 'float32', 'float64', 'int64'];
         if (tensor.datatype >= types.length) {
             throw new vulkan.Error(`Unknown tensor data type '${tensor.datatype}'.`);
         }
@@ -904,7 +936,7 @@ coreml.Reader = class {
                 /* eslint-disable no-await-in-loop */
                 const model = await factory.open(context);
                 /* eslint-enable no-await-in-loop */
-                [this.type] = model.graphs;
+                [this.type] = model.modules;
                 this.type.name = 'CoreMLBackend';
                 return;
             }

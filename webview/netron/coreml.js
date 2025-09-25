@@ -74,8 +74,8 @@ coreml.ModelFactory = class {
         return null;
     }
 
-    filter(context, type) {
-        if (context.type === 'coreml.metadata.mlmodelc' && (type === 'coreml.mil')) {
+    filter(context, match) {
+        if (context.type === 'coreml.metadata.mlmodelc' && (match.type === 'coreml.mil')) {
             return false;
         }
         return true;
@@ -212,7 +212,7 @@ coreml.Model = class {
     constructor(context) {
         this.format = context.format;
         this.metadata = Array.from(context.metadata);
-        this.graphs = context.graphs.map((context) => new coreml.Graph(context));
+        this.modules = context.graphs.map((context) => new coreml.Graph(context));
         this.functions = context.functions.map((context) => new coreml.Graph(context));
         if (context.version) {
             this.version = context.version;
@@ -1482,6 +1482,9 @@ coreml.Utility = class {
                             break;
                         case ArrayDataType.INT32:
                             dataType = 'int32';
+                            break;
+                        case ArrayDataType.INT8:
+                            dataType = 'int8';
                             break;
                         default:
                             throw new coreml.Error(`Unsupported array data type '${arrayType.dataType}'.`);

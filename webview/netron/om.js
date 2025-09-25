@@ -35,7 +35,7 @@ om.Model = class {
             signature: target.signature,
             weights: target.weights
         };
-        this.graphs = target.model.graph.map((graph) => new om.Graph(context, graph));
+        this.modules = target.model.graph.map((graph) => new om.Graph(context, graph));
     }
 };
 
@@ -451,7 +451,7 @@ om.Container = class {
                                 break;
                             }
                             default: {
-                                throw new om.Error('Unsupported DaVinci OM partition type.');
+                                throw new om.Error(`Unsupported DaVinci OM partition type '${type}'.`);
                             }
                         }
                     }
