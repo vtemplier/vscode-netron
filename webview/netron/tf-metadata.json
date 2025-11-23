@@ -2380,13 +2380,13 @@
       {
         "name": "scientific",
         "type": "boolean",
-        "description": "Use scientific notation for floating point numbers.",
+        "description": "Use scientific notation for floating point numbers.\nCan't be specified to `True` when `shortest` is set to `True`.",
         "default": false
       },
       {
         "name": "shortest",
         "type": "boolean",
-        "description": "Use shortest representation (either scientific or standard) for\nfloating point numbers.",
+        "description": "Use shortest representation (either scientific or standard) for\nfloating point numbers.\nCan't be specified to `True` when `scientific` is set to `True`.",
         "default": false
       },
       {
@@ -9035,7 +9035,7 @@
       {
         "name": "Tout",
         "type": "type",
-        "description": "Must be one of the following: `float32`, `float64`.",
+        "description": "Need to be `tf.float32` when the type of `x` is `tf.complex64`.\nNeed to be `tf.float64` when the type of `x` is `tf.complex128`. Must be one of the following: `float32`, `float64`.",
         "default": {
           "type": "type",
           "value": 1
@@ -14137,7 +14137,7 @@
       {
         "name": "binary_output",
         "type": "boolean",
-        "description": "bool; Whether the kernel should count the appearance or number of occurrences.",
+        "description": "Whether the kernel should count the appearance or number of occurrences.\nWill raise `UnimplementedError` when `binary_output` is specified to `True`\nand the size of `weights` is not 0.",
         "default": false
       }
     ],
@@ -14154,7 +14154,7 @@
       },
       {
         "name": "weights",
-        "description": "is an int32, int64, float32, or float64 `Tensor` with the same\nshape as `arr`, or a length-0 `Tensor`, in which case it acts as all weights\nequal to 1.",
+        "description": "`Tensor` with the same shape as `arr`, or a length-0 `Tensor`,\nin which case it acts as all weights equal to 1.\nNot supported by the GPU implementation of Bincount.",
         "typeAttr": "T"
       }
     ],
@@ -18178,11 +18178,12 @@
       {
         "name": "display_name",
         "type": "string",
-        "description": "A human-readable name for the threads that may be visible in some\nvisualizations.\nthreadpool."
+        "description": "A human-readable name for the threads that may be visible in some\nvisualizations."
       },
       {
         "name": "container",
         "type": "string",
+        "description": "The name of `container` should start with `'.'` or `letter` or `digit`,\nwith ['-', '.', '/'] or `letter` or `digit` follows several times.",
         "default": ""
       },
       {
@@ -18194,7 +18195,6 @@
     "outputs": [
       {
         "name": "handle",
-        "description": "A resource that can be consumed by one or more ExperimentalThreadPoolDataset\nops.",
         "type": 20
       }
     ]
@@ -22684,7 +22684,7 @@
       {
         "name": "Tout",
         "type": "type",
-        "description": "Must be one of the following: `float32`, `float64`.",
+        "description": "Need to be `tf.float32` when the type of `x` is `tf.complex64`.\nNeed to be `tf.float64` when the type of `x` is `tf.complex128`. Must be one of the following: `float32`, `float64`.",
         "default": {
           "type": "type",
           "value": 1
@@ -23783,7 +23783,7 @@
       {
         "name": "output_dtype",
         "type": "type",
-        "description": "Dtype of output. Must be one of the following: `float16`, `bfloat16`, `float32`, `float64`.",
+        "description": "Dtype of the output tensor.\n\nNote on supported input-output type combinations:\n* For floating-point types, the output has the same dtype as the input.\n* For 8-bit and 16-bit integer inputs, the output is a 32-bit float.\n* For 32-bit and 64-bit integer inputs, the output is a 64-bit float.\n\nUsing unsupported dtype pairs (for example, input=float64 with output=float32)\nwill result in a \"Could not find device for node\" error. Must be one of the following: `float16`, `bfloat16`, `float32`, `float64`.",
         "default": {
           "type": "type",
           "value": 1
@@ -34295,10 +34295,12 @@
       },
       {
         "name": "input_min",
+        "description": "If `axis` is specified, the shape of the minimum input tensor\nmust be rank 1.",
         "typeAttr": "T"
       },
       {
         "name": "input_max",
+        "description": "If `axis` is specified, the shape of the maximum input tensor\nmust be rank 1.",
         "typeAttr": "T"
       }
     ],
@@ -34387,7 +34389,7 @@
       {
         "name": "round_mode",
         "type": "string",
-        "description": "Must be one of the following: `HALF_AWAY_FROM_ZERO`, `HALF_TO_EVEN`.",
+        "description": "`round_mode='HALF_TO_EVEN'` only supported for mode 'SCALED'. Must be one of the following: `HALF_AWAY_FROM_ZERO`, `HALF_TO_EVEN`.",
         "default": "HALF_AWAY_FROM_ZERO"
       },
       {
@@ -57052,6 +57054,7 @@
       {
         "name": "container",
         "type": "string",
+        "description": "The name of `container` should start with `'.'` or `letter` or `digit`,\nwith ['-', '.', '/'] or `letter` or `digit` follows several times.",
         "default": ""
       },
       {
@@ -61613,11 +61616,12 @@
       {
         "name": "display_name",
         "type": "string",
-        "description": "A human-readable name for the threads that may be visible in some\nvisualizations.\nthreadpool."
+        "description": "A human-readable name for the threads that may be visible in some\nvisualizations."
       },
       {
         "name": "container",
         "type": "string",
+        "description": "The name of `container` should start with `'.'` or `letter` or `digit`,\nwith ['-', '.', '/'] or `letter` or `digit` follows several times.",
         "default": ""
       },
       {
@@ -61629,7 +61633,6 @@
     "outputs": [
       {
         "name": "handle",
-        "description": "A resource that can be consumed by one or more ExperimentalThreadPoolDataset\nops.",
         "type": 20
       }
     ]

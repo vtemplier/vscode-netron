@@ -1113,7 +1113,7 @@ MNN.BinaryOp = class BinaryOp {
 
     static decodeText(reader, json) {
         const $ = new MNN.BinaryOp();
-        $.opType = reader.value(json.opType, 0);
+        $.opType = MNN.BinaryOpOperation[json.opType];
         $.T = MNN.DataType[json.T];
         $.activationType = reader.value(json.activationType, 0);
         return $;
@@ -2625,7 +2625,6 @@ MNN.OpType = {
     ConvInt8: 513,
     Int8ToFloat: 514,
     DepthwiseConvInt8: 515,
-    PoolInt8: 516,
     FloatToInt8: 517,
     EltwiseInt8: 518,
     While: 600,

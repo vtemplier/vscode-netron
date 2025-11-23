@@ -26,7 +26,7 @@ view.View = class {
         this._find = null;
         this._modelFactoryService = new view.ModelFactoryService(this._host);
         this._modelFactoryService.import();
-        this._worker = this._host.environment('measure') ? null : new view.Worker(this._host);
+        this._worker = this._host.environment('serial') ? null : new view.Worker(this._host);
     }
 
     async start() {
@@ -528,7 +528,7 @@ view.View = class {
         this.model = model;
         this._path = stack;
         const status = await this.render(this.activeTarget, this.activeSignature);
-        if (status !== '') {
+        if (status === 'cancel') {
             this.model = null;
             this._path = [];
             this._activeTarget = null;
@@ -1435,7 +1435,15 @@ view.Worker = class {
     }
 
     async request(message, delay, notification) {
-        this._cancel();
+        if (this._resolve) {
+            const resolve = this._resolve;
+            resolve({ type: 'terminate' });
+            delete this._resolve;
+            delete this._reject;
+            this._cancel(true);
+        } else {
+            this._cancel(false);
+        }
         return new Promise((resolve, reject) => {
             this._resolve = resolve;
             this._reject = reject;
@@ -3518,10 +3526,12 @@ view.TensorView = class extends view.Expander {
                 }
                 const python = await import('./python.js');
                 const execution = new python.Execution();
-                const bytes = execution.invoke('io.BytesIO', []);
-                const dtype = execution.invoke('numpy.dtype', [data_type]);
-                const array = execution.invoke('numpy.asarray', [tensor.value, dtype]);
-                execution.invoke('numpy.save', [bytes, array]);
+                const io = execution.__import__('io');
+                const numpy = execution.register('numpy');
+                const bytes = new io.BytesIO();
+                const dtype = new numpy.dtype(data_type);
+                const array = numpy.asarray(tensor.value, dtype);
+                numpy.save(bytes, array);
                 bytes.seek(0);
                 const blob = new Blob([bytes.read()], { type: 'application/octet-stream' });
                 await this._host.export(file, blob);
@@ -3710,7 +3720,9 @@ view.TensorSidebar = class extends view.ObjectSidebar {
                 const dataType = type.dataType;
                 this.addProperty('type', `${dataType}`, 'code');
                 const shape = type.shape && Array.isArray(type.shape.dimensions) ? type.shape.dimensions.toString(', ') : '?';
-                this.addProperty('shape', `${shape || '&nbsp;'}`, 'code');
+                if (shape) {
+                    this.addProperty('shape', shape, 'code');
+                }
                 const denotation = type.denotation;
                 if (denotation) {
                     this.addProperty('denotation', denotation, 'code');
@@ -4558,7 +4570,7 @@ view.Documentation = class {
             if (source.min_output !== undefined) {
                 target.min_output = source.min_output;
             }
-            if (source.max_input !== undefined) {
+            if (source.max_output !== undefined) {
                 target.max_output = source.max_output;
             }
             if (source.inputs_range !== undefined) {
@@ -5990,22 +6002,20 @@ view.Context = class {
                             break;
                         }
                         case 'npz': {
-                            try {
-                                const content = new Map();
-                                const entries = await this.peek('zip');
-                                if (entries instanceof Map && entries.size > 0 &&
-                                    Array.from(entries.keys()).every((name) => name.endsWith('.npy'))) {
-                                    const python = await import('./python.js');
-                                    const execution = new python.Execution();
-                                    for (const [name, stream] of entries) {
-                                        const bytes = execution.invoke('io.BytesIO', [stream]);
-                                        const array = execution.invoke('numpy.load', [bytes]);
-                                        content.set(name, array);
-                                    }
-                                    this._content.set(type, content);
+                            const content = new Map();
+                            const entries = await this.peek('zip');
+                            if (entries instanceof Map && entries.size > 0 &&
+                                Array.from(entries.keys()).every((name) => name.endsWith('.npy'))) {
+                                const python = await import('./python.js');
+                                const execution = new python.Execution();
+                                const io = execution.__import__('io');
+                                const numpy = execution.__import__('numpy');
+                                for (const [name, stream] of entries) {
+                                    const bytes = new io.BytesIO(stream);
+                                    const array = numpy.load(bytes);
+                                    content.set(name, array);
                                 }
-                            } catch {
-                                // continue regardless of error
+                                this._content.set(type, content);
                             }
                             break;
                         }
@@ -6290,7 +6300,7 @@ view.ModelFactoryService = class {
         this.register('./nnef', ['.nnef', '.dat']);
         this.register('./onednn', ['.json']);
         this.register('./espresso', ['.espresso.net', '.espresso.shape', '.espresso.weights'], ['.mlmodelc']);
-        this.register('./mlir', ['.mlir', '.mlir.txt', '.mlirbc']);
+        this.register('./mlir', ['.mlir', '.mlir.txt', '.mlirbc', '.txt']);
         this.register('./sentencepiece', ['.model']);
         this.register('./hailo', ['.hn', '.har', '.metadata.json']);
         this.register('./tvm', ['.json', '.params']);
@@ -6531,6 +6541,7 @@ view.ModelFactoryService = class {
                     { name: 'optimization_guide.proto.PageTopicsOverrideList data', tags: [[1,[[1,2],[2,[]]]]] }, // https://github.com/chromium/chromium/blob/main/components/optimization_guide/proto/page_topics_override_list.proto
                     { name: 'optimization_guide.proto.ModelInfo data', tags: [[1,0],[2,0],[4,0],[6,false],[7,[]],[9,0]] }, // https://github.com/chromium/chromium/blob/22b0d711657b451b61d50dd2e242b3c6e38e6ef5/components/optimization_guide/proto/models.proto#L80
                     { name: 'Horizon binary model', tags: [[1,0],[2,0],[5,[[7,2],[8,2]]],[6,[[1,[[1,2],[2,2]]]]]] }, // https://github.com/HorizonRDK/hobot_dnn
+                    { name: 'TensorFlow Profiler data', tags: [[1,[[2,2],[3,[]],[4,[]]]]] }, // https://github.com/tensorflow/tensorflow/blob/master/third_party/xla/third_party/tsl/tsl/profiler/protobuf/xplane.proto
                 ];
                 const match = (tags, schema) => {
                     for (const [key, inner] of schema) {
@@ -6847,8 +6858,12 @@ view.ModelFactoryService = class {
                 { name: 'Cambricon model', value: /^\x7fMEF/ },
                 { name: 'Cambricon model', value: /^cambricon_offline/ },
                 { name: 'CviModel data', value: /^CviModel/ }, // https://github.com/sophgo/tpu-mlir/blob/master/include/tpu_mlir/Builder/CV18xx/proto/cvimodel.fbs
+                { name: 'DRTcrypt data', value: /^DRTcrypt/ },
                 { name: 'ELF executable', value: /^\x7FELF/ },
-                { name: 'Encrypted File data', value: /^ENCRYPTED_FILE|EV_ENCRYPTED/ },
+                { name: 'EDL2 data', value: /^EDL2/ },
+                { name: 'encrypted data', value: /^ENCRYPTED_FILE|EV_ENCRYPTED/ },
+                { name: 'encrypted data', value: /^Salted__/ },
+                { name: 'encrypted data', value: /^KINGSOFTOFFICE/ },
                 { name: 'GGML data', value: /^lmgg|fmgg|tjgg|algg|fugg/ },
                 { name: 'Git LFS header', value: /^\s*oid sha256:/ },
                 { name: 'Git LFS header', value: /^version https:\/\/git-lfs.github.com/ },
@@ -6873,11 +6888,13 @@ view.ModelFactoryService = class {
                 { name: 'undocumented HALCON model', value: /^HDLMODEL/ },
                 { name: 'undocumented license data', value: /^This model and the software may not be used or distributed in any manner except as authorized under a valid written agreemen/ },
                 { name: 'undocumented NNC data', value: /^(\xC0|\xBC)\x0F\x00\x00ENNC/ },
+                { name: 'undocumented RKNX data', value: /^RKNX\x00\x00\x00\x00/ },
                 { name: 'V8 context snapshot', value: /^.\x00\x00\x00.\x00\x00\x00/, identifier: /^v8_context_snapshot\.bin/ },
                 { name: 'V8 natives blob', value: /^./, identifier: /^natives_blob\.bin/ },
                 { name: 'V8 snapshot', value: /^.\x00\x00\x00.\x00\x00\x00/, identifier: /^snapshot_blob\.bin/ },
                 { name: 'ViSQOL model', value: /^svm_type\s/ },
                 { name: 'VNN model', value: /^\x2F\x4E\x00\x00.\x00\x00\x00/, identifier: /.vnnmodel$/ },
+                { name: 'Windows executable', value: /^MZ[\s\S]*PE\x00\x00/ },
             ];
             /* eslint-enable no-control-regex */
             const buffer = stream.peek(Math.min(4096, stream.length));

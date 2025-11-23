@@ -55,7 +55,7 @@ export function activate(context: vscode.ExtensionContext) {
 			const panel = vscode.window.createWebviewPanel(
 				'vscode-netron',
 				baseName + " [Netron]",
-				vscode.ViewColumn.One,
+				vscode.window.activeTextEditor?.viewColumn ?? vscode.ViewColumn.One,
 				{
 					enableScripts: true,
 					retainContextWhenHidden: true,

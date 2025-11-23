@@ -147,12 +147,14 @@ pytorch.Graph = class {
                 delattr(param_node.outputs()[0], '');
             }
             for (const node of graph.nodes()) {
-                if (node.kind() === 'prim::Constant' && node.hasAttribute('value')) {
-                    const kind = node.kindOf('value');
-                    const value = node[kind]('value');
-                    for (const output of node.outputs()) {
-                        output.identifier = output.debugName();
-                        output.value = value;
+                if (node.kind() === 'prim::Constant' && node.outputs().length === 1) {
+                    const output = node.output();
+                    output.identifier = output.debugName();
+                    if (node.hasAttribute('value')) {
+                        const kind = node.kindOf('value');
+                        output.value = node[kind]('value');
+                    } else if (node.output().type() instanceof torch.NoneType) {
+                        output.value = null;
                     }
                     // deleted.add(node);
                     node.destroy();
@@ -269,9 +271,6 @@ pytorch.Graph = class {
                 }
                 if (obj.op === 'call_function') {
                     if (obj.target.__module__ === 'operator' && obj.target.__name__ === 'getitem') {
-                        continue;
-                    }
-                    if (obj.users.size === 0) {
                         continue;
                     }
                 }
@@ -449,7 +448,11 @@ pytorch.Node = class {
                             continue;
                         }
                         const type = input.type() ? pytorch.Utility.toType(input.type()) : null;
-                        argument = new pytorch.Argument(name, input.value, type || 'attribute');
+                        let value = input.value;
+                        if (value && value instanceof torch._C.IValue) {
+                            value = pytorch.Utility.toString(value);
+                        }
+                        argument = new pytorch.Argument(name, value, type || 'attribute');
                     } else if (input.type() instanceof torch.ListType) {
                         if (input.node() && input.node().kind() === 'prim::ListConstruct' && input.uses().length === 1 &&
                         input.node().inputs().every((value) => value instanceof torch.Value || value.type() instanceof torch.IntType || value.type() instanceof torch.FloatType || value.type() instanceof torch.StringType || value.type() instanceof torch.ComplexType || value.type() instanceof torch.TensorType)) {
@@ -544,7 +547,8 @@ pytorch.Node = class {
             const blocks = node.blocks();
             for (let i = 0; i < blocks.length; i++) {
                 const block = blocks[i];
-                if (block.nodes().length > 2) {
+                const nodes = Array.from(block.nodes());
+                if (nodes.length > 0) {
                     const name = `block${i.toString()}`;
                     const graph = { name: '', nodes: [] }; // new pytorch.Graph(execution, metadata, null, name, blocks[i]);
                     const argument = new pytorch.Argument(name, graph, 'graph');
@@ -567,8 +571,18 @@ pytorch.Node = class {
                 const target = obj.target;
                 if (target instanceof torch._ops.OpOverload) {
                     name = target.name();
+                } else if (target instanceof torch._ops.HigherOrderOperator) {
+                    name = `${target.namespace}::${target.name}`;
                 } else if (builtins.isinstance(target, builtins.function)) {
                     name = target.__name__;
+                } else if (typeof target === 'string') {
+                    // Handle unresolved operators
+                    const match = target.match(/^torch\.ops\.([^.]+)\.(.+)$/);
+                    if (!match) {
+                        throw new pytorch.Error(`Unsupported target '${target}'.`);
+                    }
+                    const [, namespace, opname] = match;
+                    name = `${namespace}::${opname}`;
                 } else {
                     throw new pytorch.Error(`Unsupported target '${target}'.`);
                 }
@@ -581,8 +595,16 @@ pytorch.Node = class {
                     this.type.category = schema.category;
                 }
                 let args = obj.args.map((arg, index) => {
-                    const name = schema && Array.isArray(schema.arguments) ? schema.arguments[index].name : '';
-                    return [name, arg];
+                    if (!schema) {
+                        return ['', arg];
+                    }
+                    if (Array.isArray(schema.arguments) && index < schema.arguments.length) {
+                        return [schema.arguments[index].name, arg];
+                    }
+                    if (schema.is_vararg) {
+                        return ['', arg];
+                    }
+                    throw new pytorch.Error('Unsupported schema argument.');
                 });
                 const inputs = new Map((schema ? schema.arguments : []).map((arg) => [arg.name, arg]));
                 args = args.concat(Array.from(obj.kwargs));
@@ -658,6 +680,11 @@ pytorch.Node = class {
                     const argument = new pytorch.Argument('value', [value]);
                     this.outputs.push(argument);
                 }
+            } else if (obj.op === 'get_attr') {
+                this.type = { name: obj.op };
+                this.inputs.push(new pytorch.Argument('name', obj.target, 'string'));
+                const value = values.map(obj);
+                this.outputs.push(new pytorch.Argument('value', [value]));
             } else if (obj.op === 'root') {
                 this.type = { name: obj.op };
             } else {
@@ -862,22 +889,24 @@ pytorch.Tensor = class {
             this._values = new pytorch.Tensor('', tensor.values);
         } else if (!layout || layout === 'torch.strided') {
             this.type = new pytorch.TensorType(tensor.dtype.__reduce__(), new pytorch.TensorShape(size));
-            this._data = storage.data;
             this.encoding = '<';
             this.indices = null;
             this.stride = tensor.stride();
             const stride = this.stride;
             const offset = tensor.storage_offset();
-            let length = 0;
-            if (!Array.isArray(stride)) {
-                length = storage.size();
-            } else if (size.every((v) => v !== 0)) {
-                length = size.reduce((a, v, i) => a + stride[i] * (v - 1), 1);
-            }
-            if (offset !== 0 || length !== storage.size()) {
-                const itemsize = storage.dtype.itemsize();
-                this._offset = itemsize * offset;
-                this._length = itemsize * length;
+            if (storage) {
+                this._data = storage.data;
+                let length = 0;
+                if (!Array.isArray(stride)) {
+                    length = storage.size();
+                } else if (size.every((v) => v !== 0)) {
+                    length = size.reduce((a, v, i) => a + stride[i] * (v - 1), 1);
+                }
+                if (offset !== 0 || length !== storage.size()) {
+                    const itemsize = storage.dtype.itemsize();
+                    this._offset = itemsize * offset;
+                    this._length = itemsize * length;
+                }
             }
         } else {
             throw new pytorch.Error(`Unsupported tensor layout '${layout}'.`);
@@ -1297,7 +1326,9 @@ pytorch.Container.ModelJson = class extends pytorch.Container {
         metadata.register(this.execution);
         this.module = torch.jit.load(reader);
         if (this.module._c._has_method('forward')) {
+            // console.log(this.module.graph.toString());
             torch._C._jit_pass_inline(this.module.graph);
+            // console.log(this.module.graph.toString());
         }
         delete this._context;
         delete this._model;
@@ -1429,26 +1460,49 @@ pytorch.Container.ExportedProgram = class extends pytorch.Container {
                     const [, model_name] = match;
                     /* eslint-disable no-await-in-loop */
                     const model = await this.context.fetch(`models/${model_name}.json`);
-                    const constants = await this._fetch(`data/constants/${model_name}.pt`);
-                    const sample_inputs = await this._fetch(`data/sample_inputs/${model_name}.pt`);
-                    const weights = await this._fetch(`data/weights/${model_name}.pt`);
                     const exported_program = await model.read('json');
-                    /* eslint-enable no-await-in-loop */
                     exported_programs.set(model_name, exported_program);
                     f.set(`models/${model_name}.json`, exported_program);
-                    f.set(`data/weights/${model_name}.pt`, weights);
-                    f.set(`data/constants/${model_name}.pt`, constants);
+                    const sample_inputs = await this._fetch(`data/sample_inputs/${model_name}.pt`, 'zip');
                     f.set(`data/sample_inputs/${model_name}.pt`, sample_inputs);
+                    const weights_config = await this._fetch(`data/weights/${model_name}_weights_config.json`, 'json');
+                    if (weights_config) {
+                        f.set(`data/weights/${model_name}_weights_config.json`, weights_config);
+                        for (const payload_meta of Object.values(weights_config.config)) {
+                            const weight_data = await this._fetch(`data/weights/${payload_meta.path_name}`, 'binary');
+                            if (weight_data) {
+                                f.set(`data/weights/${payload_meta.path_name}`, weight_data);
+                            }
+                        }
+                    } else {
+                        const weights = await this._fetch(`data/weights/${model_name}.pt`, 'zip');
+                        f.set(`data/weights/${model_name}.pt`, weights);
+                    }
+                    const constants_config = await this._fetch(`data/constants/${model_name}_constants_config.json`, 'json');
+                    if (constants_config) {
+                        f.set(`data/constants/${model_name}_constants_config.json`, constants_config);
+                        for (const payload_meta of Object.values(constants_config.config)) {
+                            // eslint-enable no-await-in-loop
+                            const constant_data = await this._fetch(`data/constants/${payload_meta.path_name}`, 'binary');
+                            if (constant_data) {
+                                f.set(`data/constants/${payload_meta.path_name}`, constant_data);
+                            }
+                        }
+                    } else {
+                        const constants = await this._fetch(`data/constants/${model_name}.pt`);
+                        f.set(`data/constants/${model_name}.pt`, constants);
+                    }
+                    /* eslint-enable no-await-in-loop */
                 }
             }
-            const byteorder = await this._text('byteorder') || 'little';
+            const byteorder = await this._fetch('byteorder', 'text') || 'little';
             f.set('byteorder', byteorder);
         } else {
-            this.version = await this._text('version');
+            this.version = await this._fetch('version', 'text') || '';
             this.version = this.version.split('\n').shift().trim();
-            const weights = await this._fetch('serialized_state_dict.pt') || await this._fetch('serialized_state_dict.json');
-            const constants = await this._fetch('serialized_constants.pt') || await this._fetch('serialized_constants.json');
-            const sample_inputs = await this._fetch('serialized_example_inputs.pt');
+            const weights = await this._fetch('serialized_state_dict.pt', 'zip') || await this._fetch('serialized_state_dict.json', 'zip');
+            const constants = await this._fetch('serialized_constants.pt', 'zip') || await this._fetch('serialized_constants.json', 'zip');
+            const sample_inputs = await this._fetch('serialized_example_inputs.pt', 'zip');
             f.set('models/model.json', this.exported_program);
             f.set('data/weights/model.pt', weights);
             f.set('data/constants/model.pt', constants);
@@ -1498,31 +1552,37 @@ pytorch.Container.ExportedProgram = class extends pytorch.Container {
         this.modules = pt2_contents.exported_programs;
     }
 
-    async _fetch(name) {
+    async _fetch(name, type) {
         try {
             const context = await this.context.fetch(name);
             if (context) {
-                return await context.peek('zip');
-            }
-        } catch {
-            // continue regardless of error
-        }
-        return null;
-    }
-
-    async _text(name) {
-        try {
-            const content = await this.context.fetch(name);
-            if (content) {
-                const reader = await content.read('text');
-                if (reader) {
-                    return reader.read();
+                switch (type) {
+                    case 'zip':
+                        return await context.peek('zip');
+                    case 'json':
+                        return await context.read('json');
+                    case 'text': {
+                        const reader = await context.read('text');
+                        if (reader) {
+                            return reader.read();
+                        }
+                        break;
+                    }
+                    case 'binary': {
+                        if (context && context.stream) {
+                            return context.stream.peek();
+                        }
+                        break;
+                    }
+                    default: {
+                        throw new pytorch.Error(`Unsupported context type '${type}.`);
+                    }
                 }
             }
         } catch {
             // continue regardless of error
         }
-        return '';
+        return null;
     }
 };
 
@@ -1861,11 +1921,29 @@ pytorch.Utility = class {
             case 'Layout': return 'Layout';
             case 'VarType': return type.annotation_str;
             case 'NoneType': return 'None';
+            case 'AnyType': return 'object';
             case 'AnyListType': return 'list';
             case 'AnyTupleType': return 'tuple';
             case 'ClassType': return type.annotation_str;
+            case 'EnumType': return type.annotation_str;
             default: throw new pytorch.Error(`Unsupported type '${type.kind()}'.`);
         }
+    }
+
+    static toString(ivalue) {
+        if (ivalue.isInt()) {
+            return ivalue.toInt();
+        }
+        if (ivalue.isDouble()) {
+            return ivalue.toDouble();
+        }
+        if (ivalue.isEnum()) {
+            return ivalue.toEnumHolder().name();
+        }
+        if (ivalue.isList()) {
+            return ivalue.toList().map((item) => pytorch.Utility.toString(item));
+        }
+        throw new pytorch.Error(`Unsupported IValue '${ivalue.tag}.`);
     }
 
     static constant(node, name) {

@@ -2342,6 +2342,7 @@ tensorflow.DataType = {
     "DT_UINT4": 30,
     "DT_INT2": 31,
     "DT_UINT2": 32,
+    "DT_FLOAT4_E2M1FN": 33,
     "DT_FLOAT_REF": 101,
     "DT_DOUBLE_REF": 102,
     "DT_INT32_REF": 103,
@@ -2373,7 +2374,8 @@ tensorflow.DataType = {
     "DT_INT4_REF": 129,
     "DT_UINT4_REF": 130,
     "DT_INT2_REF": 131,
-    "DT_UINT2_REF": 132
+    "DT_UINT2_REF": 132,
+    "DT_FLOAT4_E2M1FN_REF": 133
 };
 
 tensorflow.SerializedDType = class SerializedDType {
@@ -8963,6 +8965,9 @@ tensorflow.ConfigProto.Experimental = class Experimental {
                 case 35:
                     message.tf2xla_dump_dir = reader.string();
                     break;
+                case 36:
+                    message.online_cost_analysis = reader.bool();
+                    break;
                 default:
                     reader.skipType(tag & 7);
                     break;
@@ -9070,6 +9075,9 @@ tensorflow.ConfigProto.Experimental = class Experimental {
                 case "tf2xla_dump_dir":
                     message.tf2xla_dump_dir = reader.string();
                     break;
+                case "online_cost_analysis":
+                    message.online_cost_analysis = reader.bool();
+                    break;
                 default:
                     reader.field(tag, message);
                     break;
@@ -9173,6 +9181,9 @@ tensorflow.ConfigProto.Experimental = class Experimental {
         if ('tf2xlaDumpDir' in obj) {
             message.tf2xla_dump_dir = obj.tf2xlaDumpDir;
         }
+        if ('onlineCostAnalysis' in obj) {
+            message.online_cost_analysis = obj.onlineCostAnalysis;
+        }
         return message;
     }
 };
@@ -9208,6 +9219,7 @@ tensorflow.ConfigProto.Experimental.prototype.disable_eager_executor_streaming_e
 tensorflow.ConfigProto.Experimental.prototype.finalize_function_library_runtime = false;
 tensorflow.ConfigProto.Experimental.prototype.finalize_resource_manager = false;
 tensorflow.ConfigProto.Experimental.prototype.tf2xla_dump_dir = "";
+tensorflow.ConfigProto.Experimental.prototype.online_cost_analysis = false;
 
 tensorflow.ConfigProto.Experimental.MlirBridgeRollout = {
     "MLIR_BRIDGE_ROLLOUT_UNSPECIFIED": 0,

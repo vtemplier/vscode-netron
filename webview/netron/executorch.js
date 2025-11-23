@@ -5,6 +5,7 @@ const executorch = {};
 const coreml = {};
 const vulkan = {};
 const xnnpack = {};
+const qnn = {};
 
 import * as base from './base.js';
 import * as python from './python.js';
@@ -161,7 +162,8 @@ executorch.Node = class {
             const op = plan.operators[instr_args.op_index];
             const name = op.name.split('::').pop();
             const identifier = op.overload ? `${op.name}.${op.overload}` : op.name;
-            const schemas = target.execution.invoke('torch._C._jit_get_schemas_for_operator', [op.name]);
+            const torch = target.execution.__import__('torch');
+            const schemas = torch._C._jit_get_schemas_for_operator(op.name);
             const schema = schemas.find((schema) => schema.name === op.name && schema.overload_name === op.overload);
             if (!schema) {
                 throw new executorch.Error(`Operator schema for '${identifier}' not found.`);
@@ -233,22 +235,40 @@ executorch.Node = class {
 executorch.TensorType = class {
 
     constructor(tensor) {
-        executorch.TensorType._types = executorch.TensorType._types || [
-            'uint8',
-            'int8', 'int16', 'int32', 'int64',
-            'float16', 'float32', 'float64',
-            'complex16', 'complex32', 'complex64',
-            'boolean',
-            'qint8', 'quint8', 'qint32',
-            'bfloat16',
-            'quint4x2', 'quint2x4', 'bits1x8', 'bits2x4', 'bits4x2', 'bits8', 'bits16',
-            'float8e5m2', 'float8e4m3fn', 'float8e5m2fnuz', 'float8e4m3fnuz',
-            'uint16', 'uint32', 'uint64'
-        ];
-        if (tensor.scalar_type >= executorch.TensorType._types.length) {
-            throw new executorch.Error(`Unknown tensor data type '${tensor.scalar_type}'.`);
+        const ScalarType = executorch.schema.executorch_flatbuffer.ScalarType;
+        switch (tensor.scalar_type) {
+            case ScalarType.BYTE: this.dataType = 'uint8'; break;
+            case ScalarType.CHAR: this.dataType = 'int8'; break;
+            case ScalarType.SHORT: this.dataType = 'int16'; break;
+            case ScalarType.INT: this.dataType = 'int32'; break;
+            case ScalarType.LONG: this.dataType = 'int64'; break;
+            case ScalarType.HALF: this.dataType = 'float16'; break;
+            case ScalarType.FLOAT: this.dataType = 'float32'; break;
+            case ScalarType.DOUBLE: this.dataType = 'float64'; break;
+            case 8: this.dataType = 'complex32'; break;
+            case 9: this.dataType = 'complex64'; break;
+            case 10: this.dataType = 'complex128'; break;
+            case ScalarType.BOOL: this.dataType = 'boolean'; break;
+            case ScalarType.QINT8: this.dataType = 'qint8'; break;
+            case ScalarType.QUINT8: this.dataType = 'quint8'; break;
+            case ScalarType.QINT32: this.dataType = 'qint32'; break;
+            case 15: this.dataType = 'bfloat16'; break;
+            case ScalarType.QUINT4X2: this.dataType = 'quint4x2'; break;
+            case ScalarType.QUINT2X4: this.dataType = 'quint2x4'; break;
+            case 18: this.dataType = 'bits1x8'; break;
+            case 19: this.dataType = 'bits2x4'; break;
+            case 20: this.dataType = 'bits4x2'; break;
+            case 21: this.dataType = 'bits8'; break;
+            case ScalarType.BITS16: this.dataType = 'bits16'; break;
+            case ScalarType.FLOAT8E5M2: this.dataType = 'float8e5m2'; break;
+            case ScalarType.FLOAT8E4M3FN: this.dataType = 'float8e4m3fn'; break;
+            case ScalarType.FLOAT8E5M2FNUZ: this.dataType = 'float8e5m2fnuz'; break;
+            case ScalarType.FLOAT8E4M3FNUZ: this.dataType = 'float8e4m3fnuz'; break;
+            case ScalarType.UINT16: this.dataType = 'uint16'; break;
+            case ScalarType.UINT32: this.dataType = 'uint32'; break;
+            case ScalarType.UINT64: this.dataType = 'uint64'; break;
+            default: throw new executorch.Error(`Unknown tensor data type '${tensor.scalar_type}'.`);
         }
-        this.dataType = executorch.TensorType._types[tensor.scalar_type];
         this.shape = new executorch.TensorShape(Array.from(tensor.sizes));
     }
 
@@ -279,8 +299,13 @@ executorch.Tensor = class {
         const program = target.program;
         if (tensor.extra_tensor_info) {
             throw new executorch.Error('Extra tensor info not implemented.');
-        } else if (program.constant_buffers) {
-            throw new executorch.Error('Constant buffers not implemented.');
+        } else if (Array.isArray(program.constant_buffer) && program.constant_buffer.length > 0) {
+            if (data_buffer_idx >= program.constant_buffer.length) {
+                throw new executorch.Error(`Constant buffer index out of range.`);
+            }
+            const buffer = program.constant_buffer[data_buffer_idx];
+            this.values = buffer.storage;
+            this.encoding = '<';
         } else if (tensor.allocation_info === null) {
             const constant_segment = program.constant_segment;
             const data_segment = program.segments[constant_segment.segment_index];
@@ -375,6 +400,10 @@ executorch.Reader = class {
                             }
                             case 'VulkanBackend': {
                                 delegate.backend = vulkan.Reader.open(data, this);
+                                break;
+                            }
+                            case 'QnnBackend': {
+                                delegate.backend = qnn.Reader.open(data, this);
                                 break;
                             }
                             default: {
@@ -877,7 +906,7 @@ vulkan.Metadata = class {
     }
 
     register(signature) {
-        const torch = this.execution.register('torch');
+        const torch = this.execution.__import__('torch');
         const registry = torch._C.getRegistry();
         const schema = torch.FunctionSchema.parse(signature);
         const op = new torch._C.Operator(schema);
@@ -888,7 +917,8 @@ vulkan.Metadata = class {
         identifier = identifier.split(/\.([^.]*)$/);
         const name = identifier[0].replace('.', '::');
         const overload = identifier[1] === 'default' ? '' : identifier[1];
-        const schemas = this.execution.invoke('torch._C._jit_get_schemas_for_operator', [name]);
+        const torch = this.execution.__import__('torch');
+        const schemas = torch._C._jit_get_schemas_for_operator(name);
         const schema = schemas.find((schema) => schema.name === name && schema.overload_name === overload);
         return schema;
     }
@@ -1060,6 +1090,32 @@ coreml.Context = class {
         this.type = type;
         this.value = value;
         return type;
+    }
+};
+
+qnn.Reader = class {
+
+    static open(data, target) {
+        if (data.length >= 20) {
+            const reader = base.BinaryReader.open(data);
+            const magic = reader.uint32();
+            if (magic === 0x5678ABCD) {
+                return new qnn.Reader(reader, target);
+            }
+        }
+        return null;
+    }
+
+    constructor(reader, target) {
+        this.reader = reader;
+        this.target = target;
+        this.signature = reader.uint64();
+        this.size = reader.uint64();
+    }
+
+    async read() {
+        // https://github.com/pytorch/executorch/blob/main/backends/qualcomm/runtime/backends/QnnCustomProtocol.h
+        throw new executorch.Error('QNN backend not implemented.');
     }
 };
 

@@ -607,6 +607,8 @@ fb_xnnpack.XNodeUnion = class {
             case 42: return fb_xnnpack.XNNGelu.decode(reader, position);
             case 43: return fb_xnnpack.XNNTanh.decode(reader, position);
             case 44: return fb_xnnpack.XNNExp.decode(reader, position);
+            case 45: return fb_xnnpack.XNNSin.decode(reader, position);
+            case 46: return fb_xnnpack.XNNCopy.decode(reader, position);
             default: return undefined;
         }
     }
@@ -1220,6 +1222,24 @@ fb_xnnpack.XNNExp = class XNNExp {
     }
 };
 
+fb_xnnpack.XNNSin = class XNNSin {
+
+    static decode(reader, position) {
+        const $ = new fb_xnnpack.XNNSin();
+        fb_xnnpack._XNNNode1x1.decode(reader, position, $);
+        return $;
+    }
+};
+
+fb_xnnpack.XNNCopy = class XNNCopy {
+
+    static decode(reader, position) {
+        const $ = new fb_xnnpack.XNNCopy();
+        fb_xnnpack._XNNNode1x1.decode(reader, position, $);
+        return $;
+    }
+};
+
 vkgraph.OperatorCall = class OperatorCall {
 
     static decode(reader, position) {
@@ -1254,6 +1274,8 @@ vkgraph.VkMemoryLayout = {
     TENSOR_WIDTH_PACKED: 0,
     TENSOR_HEIGHT_PACKED: 1,
     TENSOR_CHANNELS_PACKED: 2,
+    PACKED_INT8_4W4C: 3,
+    PACKED_INT8_4H4W: 4,
     DEFAULT_LAYOUT: 255
 };
 

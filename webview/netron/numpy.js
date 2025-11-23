@@ -30,8 +30,10 @@ numpy.ModelFactory = class {
                 const execution = new python.Execution();
                 execution.on('resolve', (sender, name) => unresolved.add(name));
                 const stream = context.stream;
-                const bytes = execution.invoke('io.BytesIO', [stream]);
-                const array = execution.invoke('numpy.load', [bytes]);
+                const io = execution.__import__('io');
+                const numpy = execution.__import__('numpy');
+                const bytes = new io.BytesIO(stream);
+                const array = numpy.load(bytes);
                 if (unresolved.size > 0) {
                     const name = unresolved.values().next().value;
                     throw new numpy.Error(`Unknown type name '${name}'.`);
@@ -130,8 +132,9 @@ numpy.Tensor = class  {
     constructor(array) {
         this.type = new numpy.TensorType(array.dtype.__name__, new numpy.TensorShape(array.shape));
         this.stride = array.strides.map((stride) => stride / array.itemsize);
-        this.values = this.type.dataType === 'string' || this.type.dataType === 'object' || this.type.dataType === 'void' ? array.flatten().tolist() : array.tobytes();
-        this.encoding = this.type.dataType === 'string' || this.type.dataType === 'object' ? '|' : array.dtype.byteorder;
+        const list = this.type.dataType === 'string' || this.type.dataType === 'object' || this.type.dataType === 'void';
+        this.values = list ? array.flatten().tolist() : array.tobytes();
+        this.encoding = list ? '|' : array.dtype.byteorder;
     }
 };
 
