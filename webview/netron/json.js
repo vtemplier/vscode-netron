@@ -8,6 +8,7 @@ json.TextReader = class {
 
     static open(data) {
         const decoder = text.Decoder.open(data);
+        const position = decoder.position;
         let state = '';
         for (let i = 0; i < 0x1000; i++) {
             const c = decoder.decode();
@@ -37,13 +38,13 @@ json.TextReader = class {
                     }
                     break;
                 case '[]':
-                    if (c !== '"' && c !== '-' && c !== '+' && c !== '{' && c !== '[' && (c < '0' || c > '9')) {
+                    if (c !== '"' && c !== '-' && c !== '+' && c !== '{' && c !== '[' && c !== ']' && (c < '0' || c > '9')) {
                         return null;
                     }
                     state = 'match';
                     break;
                 case '{}':
-                    if (c !== '"') {
+                    if (c !== '"' && c !== '}') {
                         return null;
                     }
                     state = 'match';
@@ -52,19 +53,20 @@ json.TextReader = class {
                     break;
             }
         }
+        decoder.position = position;
         return new json.TextReader(decoder);
     }
 
     constructor(decoder) {
         this._decoder = decoder;
-        this._decoder.position = 0;
+        this._start = decoder.position;
         this._escape = { '"': '"', '\\': '\\', '/': '/', b: '\b', f: '\f', n: '\n', r: '\r', t: '\t' };
     }
 
     read() {
         const stack = [];
-        this._decoder.position = 0;
-        this._position = 0;
+        this._decoder.position = this._start;
+        this._position = this._start;
         this._char = this._decoder.decode();
         this._whitespace();
         let obj = null;
@@ -380,7 +382,7 @@ json.TextReader = class {
     _location() {
         let line = 1;
         let column = 1;
-        this._decoder.position = 0;
+        this._decoder.position = this._start;
         let c = '';
         do {
             if (this._decoder.position === this._position) {
@@ -466,7 +468,11 @@ json.BinaryReader = class {
                 continue;
             }
             const start = position;
-            position = buffer.indexOf(0x00, start) + 1;
+            position = buffer.indexOf(0x00, start);
+            if (position === -1) {
+                throw new bson.Error('Missing string terminator.');
+            }
+            position += 1;
             const key = asciiDecoder.decode(buffer.subarray(start, position - 1));
             let value = null;
             switch (type) {
@@ -530,13 +536,13 @@ json.BinaryReader = class {
                 case 0x11: { // uint64
                     const start = position;
                     skip(8);
-                    value = Number(view.getBigUint64(start, true));
+                    value = view.getBigUint64(start, true);
                     break;
                 }
                 case 0x12: { // int64
                     const start = position;
                     skip(8);
-                    value = Number(view.getBigInt64(start, true));
+                    value = view.getBigInt64(start, true);
                     break;
                 }
                 default: {

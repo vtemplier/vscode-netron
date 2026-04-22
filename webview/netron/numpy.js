@@ -14,7 +14,7 @@ numpy.ModelFactory = class {
             return context.set('npy');
         }
         const entries = await context.peek('npz');
-        if (entries && entries.size > 0) {
+        if (entries instanceof Map && entries.size > 0) {
             return context.set('npz', entries);
         }
         return null;
@@ -31,9 +31,9 @@ numpy.ModelFactory = class {
                 execution.on('resolve', (sender, name) => unresolved.add(name));
                 const stream = context.stream;
                 const io = execution.__import__('io');
-                const numpy = execution.__import__('numpy');
+                const np = execution.__import__('numpy');
                 const bytes = new io.BytesIO(stream);
-                const array = numpy.load(bytes);
+                const array = np.load(bytes);
                 if (unresolved.size > 0) {
                     const name = unresolved.values().next().value;
                     throw new numpy.Error(`Unknown type name '${name}'.`);
@@ -100,13 +100,13 @@ numpy.Argument = class {
 
 numpy.Value = class {
 
-    constructor(name, initializer) {
+    constructor(name, initializer = null) {
         if (typeof name !== 'string') {
             throw new numpy.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
         this.name = name;
         this.type = initializer.type;
-        this.initializer = initializer || null;
+        this.initializer = initializer;
     }
 };
 
@@ -204,8 +204,8 @@ numpy.Utility = class {
                             if (value && value.__class__ && value.__class__.__module__ && value.__class__.__name__) {
                                 weights.set(`${name}.__class__`, `${value.__class__.__module__}.${value.__class__.__name__}`);
                             }
-                            for (const [name, obj] of Object.entries(value)) {
-                                weights.set(`${name}.${name}`, obj);
+                            for (const [key, obj] of Object.entries(value)) {
+                                weights.set(`${name}.${key}`, obj);
                             }
                             continue;
                         }
@@ -261,7 +261,7 @@ numpy.Error = class extends Error {
 
     constructor(message) {
         super(message);
-        this.name = 'Error loading Chainer model.';
+        this.name = 'Error loading NumPy model.';
     }
 };
 

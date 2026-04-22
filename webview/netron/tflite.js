@@ -361,11 +361,17 @@ tflite.Node = class {
             if (options) {
                 for (const [name, value] of Object.entries(options)) {
                     if (name === 'fused_activation_function' && value) {
-                        if (value < 1 || value > 5) {
-                            throw new tflite.Error(`Unsupported activation function index '${value}'.`);
+                        const ActivationFunctionType = tflite.schema.ActivationFunctionType;
+                        let type = '';
+                        switch (value) {
+                            case ActivationFunctionType.RELU: type = 'Relu'; break;
+                            case ActivationFunctionType.RELU_N1_TO_1: type = 'ReluN1To1'; break;
+                            case ActivationFunctionType.RELU6: type = 'Relu6'; break;
+                            case ActivationFunctionType.TANH: type = 'Tanh'; break;
+                            case ActivationFunctionType.SIGN_BIT: type = 'SignBit'; break;
+                            case 6: type = 'Sigmoid'; break;
+                            default: type = value.toString(); break;
                         }
-                        const list = ['Unknown', 'Relu', 'ReluN1To1', 'Relu6', 'Tanh', 'SignBit'];
-                        const type = list[value];
                         const node = new tflite.Node(metadata, null, { name: type }, null, []);
                         this.chain = [node];
                     }
@@ -381,7 +387,10 @@ tflite.Node = class {
                     visible = false;
                 }
                 if (type) {
-                    value = tflite.Utility.enum(type, value);
+                    const enumType = tflite.schema[type];
+                    if (enumType) {
+                        value = enumType[value] || value;
+                    }
                 }
                 if (metadata) {
                     if (metadata.visible === false) {
@@ -403,11 +412,11 @@ tflite.Node = class {
 
 tflite.Argument = class {
 
-    constructor(name, value, type, visible) {
+    constructor(name, value, type = null, visible = true) {
         this.name = name;
         this.value = value;
-        this.type = type || null;
-        this.visible = visible !== false;
+        this.type = type;
+        this.visible = visible;
     }
 };
 
@@ -492,7 +501,16 @@ tflite.TensorType = class {
 
     constructor(tensor, denotation) {
         const shape = tensor.shape_signature && tensor.shape_signature.length > 0 ? tensor.shape_signature : tensor.shape;
-        this.dataType = tflite.Utility.dataType(tensor.type);
+        switch (tensor.type) {
+            case tflite.schema.TensorType.BOOL: this.dataType = 'boolean'; break;
+            case tflite.schema.TensorType.COMPLEX64: this.dataType = 'complex<float32>'; break;
+            case tflite.schema.TensorType.COMPLEX128: this.dataType = 'complex<float64>'; break;
+            default: {
+                const name = tflite.schema.TensorType[tensor.type];
+                this.dataType = name ? name.toLowerCase() : '?';
+                break;
+            }
+        }
         this.shape = new tflite.TensorShape(Array.from(shape || []));
         this.denotation = denotation;
     }
@@ -513,33 +531,6 @@ tflite.TensorShape = class {
             return '';
         }
         return `[${this.dimensions.map((dimension) => dimension.toString()).join(',')}]`;
-    }
-};
-
-tflite.Utility = class {
-
-    static dataType(type) {
-        if (!tflite.Utility._tensorTypes) {
-            tflite.Utility._tensorTypes = new Map(Object.entries(tflite.schema.TensorType).map(([key, value]) => [value, key.toLowerCase()]));
-            tflite.Utility._tensorTypes.set(6, 'boolean');
-        }
-        return tflite.Utility._tensorTypes.has(type) ? tflite.Utility._tensorTypes.get(type) : '?';
-    }
-
-    static enum(name, value) {
-        const type = name && tflite.schema ? tflite.schema[name] : undefined;
-        if (type) {
-            tflite.Utility._enums = tflite.Utility._enums || new Map();
-            if (!tflite.Utility._enums.has(name)) {
-                const entries = new Map(Object.entries(type).map(([key, value]) => [value, key]));
-                tflite.Utility._enums.set(name, entries);
-            }
-            const map = tflite.Utility._enums.get(name);
-            if (map.has(value)) {
-                return map.get(value);
-            }
-        }
-        return value;
     }
 };
 

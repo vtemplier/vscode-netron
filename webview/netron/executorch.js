@@ -6,6 +6,9 @@ const coreml = {};
 const vulkan = {};
 const xnnpack = {};
 const qnn = {};
+const ethosu = {};
+const openvino = {};
+const rockchip = {};
 
 import * as base from './base.js';
 import * as python from './python.js';
@@ -67,6 +70,10 @@ executorch.Graph = class {
             return list;
         };
         values.map = (index, output) => {
+            if (output && values.has(index) && !Array.isArray(values.get(index).value)) {
+                const value = [new executorch.Value(index.toString(), null, null)];
+                values.set(index, { type: null, value });
+            }
             if (!values.has(index)) {
                 const executorch_flatbuffer = executorch.schema.executorch_flatbuffer;
                 const val = plan.values[index].val;
@@ -120,7 +127,14 @@ executorch.Graph = class {
             const argument = new executorch.Argument(name, value.value, value.type);
             this.outputs.push(argument);
         }
+        const executorch_flatbuffer = executorch.schema.executorch_flatbuffer;
         for (const instruction of chain.instructions) {
+            const instr_args = instruction.instr_args;
+            if (instr_args instanceof executorch_flatbuffer.JumpFalseCall ||
+                instr_args instanceof executorch_flatbuffer.MoveCall ||
+                instr_args instanceof executorch_flatbuffer.FreeCall) {
+                continue;
+            }
             const node = new executorch.Node(target, plan, chain, instruction, values);
             this.nodes.push(node);
         }
@@ -129,23 +143,23 @@ executorch.Graph = class {
 
 executorch.Argument = class {
 
-    constructor(name, value, type, visible) {
+    constructor(name, value, type = null, visible = true) {
         this.name = name;
         this.value = value;
-        this.type = type || null;
-        this.visible = visible !== false;
+        this.type = type;
+        this.visible = visible;
     }
 };
 
 executorch.Value = class Value {
 
-    constructor(name, type, initializer) {
+    constructor(name, type, initializer = null) {
         if (typeof name !== 'string') {
             throw new executorch.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
         this.name = name;
         this.type = initializer && initializer.type ? initializer.type : type || null;
-        this.initializer = initializer || null;
+        this.initializer = initializer;
     }
 };
 
@@ -217,7 +231,7 @@ executorch.Node = class {
             for (let i = 0; i < outputs.length; i++) {
                 const output = outputs[i];
                 const value = values.map(output);
-                const name = inputs.length === 1 ? 'output' : `output.${i}`;
+                const name = outputs.length === 1 ? 'output' : `output.${i}`;
                 const argument = new executorch.Argument(name, value.value, value.type);
                 this.outputs.push(argument);
             }
@@ -245,9 +259,10 @@ executorch.TensorType = class {
             case ScalarType.HALF: this.dataType = 'float16'; break;
             case ScalarType.FLOAT: this.dataType = 'float32'; break;
             case ScalarType.DOUBLE: this.dataType = 'float64'; break;
-            case 8: this.dataType = 'complex32'; break;
-            case 9: this.dataType = 'complex64'; break;
-            case 10: this.dataType = 'complex128'; break;
+            case ScalarType.BFLOAT16: this.dataType = 'bfloat16'; break;
+            case 8: this.dataType = 'complex<float16>'; break;
+            case 9: this.dataType = 'complex<float32>'; break;
+            case 10: this.dataType = 'complex<float64>'; break;
             case ScalarType.BOOL: this.dataType = 'boolean'; break;
             case ScalarType.QINT8: this.dataType = 'qint8'; break;
             case ScalarType.QUINT8: this.dataType = 'quint8'; break;
@@ -279,8 +294,8 @@ executorch.TensorType = class {
 
 executorch.TensorShape = class {
 
-    constructor(dimensions) {
-        this.dimensions = dimensions || [];
+    constructor(dimensions = []) {
+        this.dimensions = dimensions;
     }
 
     toString() {
@@ -390,29 +405,32 @@ executorch.Reader = class {
                             }
                         }
                         switch (delegate.id) {
-                            case 'XnnpackBackend': {
+                            case 'XnnpackBackend':
                                 delegate.backend = xnnpack.Reader.open(data, this);
                                 break;
-                            }
-                            case 'CoreMLBackend': {
+                            case 'CoreMLBackend':
                                 delegate.backend = coreml.Reader.open(data, this);
                                 break;
-                            }
-                            case 'VulkanBackend': {
+                            case 'VulkanBackend':
                                 delegate.backend = vulkan.Reader.open(data, this);
                                 break;
-                            }
-                            case 'QnnBackend': {
+                            case 'QnnBackend':
                                 delegate.backend = qnn.Reader.open(data, this);
                                 break;
-                            }
-                            default: {
+                            case 'EthosUBackend':
+                                delegate.backend = ethosu.Reader.open(data, this);
+                                break;
+                            case 'OpenvinoBackend':
+                                delegate.backend = openvino.Reader.open(data, this);
+                                break;
+                            case 'RockchipBackend':
+                                delegate.backend = rockchip.Reader.open(data, this);
+                                break;
+                            default:
                                 throw new executorch.Error(`ExecuTorch delegate '${delegate.id}' not implemented.`);
-                            }
                         }
-                        /* eslint-disable no-await-in-loop */
+                        // eslint-disable-next-line no-await-in-loop
                         await delegate.backend.read();
-                        /* eslint-enable no-await-in-loop */
                     }
                 }
             }
@@ -570,7 +588,7 @@ xnnpack.Node = class {
             let value = ArrayBuffer.isView(obj) ? Array.from(obj) : obj;
             let type = 'attribute';
             if (name.endsWith('_id')) {
-                value = obj === -1 ? [] : [values.map(obj)];
+                value = obj === -1 || obj === 0xFFFFFFFF ? [] : [values.map(obj)];
                 type = null;
             }
             const argument = new xnnpack.Argument(name, value, type);
@@ -585,23 +603,23 @@ xnnpack.Node = class {
 
 xnnpack.Argument = class {
 
-    constructor(name, value, type, visible) {
+    constructor(name, value, type = null, visible = true) {
         this.name = name;
         this.value = value;
-        this.type = type || null;
-        this.visible = visible !== false;
+        this.type = type;
+        this.visible = visible;
     }
 };
 
 xnnpack.Value = class Value {
 
-    constructor(name, type, initializer) {
+    constructor(name, type, initializer = null) {
         if (typeof name !== 'string') {
             throw new executorch.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
         this.name = name;
         this.type = initializer && initializer.type ? initializer.type : type || null;
-        this.initializer = initializer || null;
+        this.initializer = initializer;
     }
 };
 
@@ -669,8 +687,8 @@ xnnpack.TensorType = class {
 
 xnnpack.TensorShape = class {
 
-    constructor(dimensions) {
-        this.dimensions = dimensions || [];
+    constructor(dimensions = []) {
+        this.dimensions = dimensions;
     }
 
     toString() {
@@ -840,23 +858,23 @@ vulkan.Node = class {
 
 vulkan.Argument = class {
 
-    constructor(name, value, type, visible) {
+    constructor(name, value, type = null, visible = true) {
         this.name = name;
         this.value = value;
-        this.type = type || null;
-        this.visible = visible !== false;
+        this.type = type;
+        this.visible = visible;
     }
 };
 
 vulkan.Value = class Value {
 
-    constructor(name, type, initializer) {
+    constructor(name, type, initializer = null) {
         if (typeof name !== 'string') {
             throw new executorch.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
         this.name = name;
         this.type = initializer && initializer.type ? initializer.type : type || null;
-        this.initializer = initializer || null;
+        this.initializer = initializer;
     }
 };
 
@@ -869,6 +887,19 @@ vulkan.TensorType = class {
         }
         this.dataType = types[tensor.datatype];
         this.shape = new vulkan.TensorShape(Array.from(tensor.dims));
+        const vkgraph = executorch.schema.vkgraph;
+        if (tensor.memory_layout !== vkgraph.VkMemoryLayout.DEFAULT_LAYOUT) {
+            this.denotation = vkgraph.VkMemoryLayout[tensor.memory_layout];
+            if (!this.denotation) {
+                throw new vulkan.Error(`Unsupported memory layout '${tensor.memory_layout}'.`);
+            }
+        }
+        if (tensor.storage_type !== vkgraph.VkStorageType.DEFAULT_STORAGE) {
+            this.layout = vkgraph.VkStorageType[tensor.storage_type];
+            if (!this.layout) {
+                throw new vulkan.Error(`Unsupported storage type '${tensor.storage_type}'.`);
+            }
+        }
     }
 
     toString() {
@@ -878,8 +909,8 @@ vulkan.TensorType = class {
 
 vulkan.TensorShape = class {
 
-    constructor(dimensions) {
-        this.dimensions = dimensions || [];
+    constructor(dimensions = []) {
+        this.dimensions = dimensions;
     }
 
     toString() {
@@ -952,20 +983,18 @@ coreml.Reader = class {
     async read() {
         const entries = this.entries(this.reader);
         const factory = await this.factory();
-        const protobuf = await import('./protobuf.js');
-        for (const [key, value] of entries) {
-            const path = key.split('/');
-            const identifier = path.pop();
-            const folder = path.length === 0 ? '' : `${path.join('/')}/`;
-            const locals = new Map(Array.from(entries).filter(([key]) => key.startsWith(folder)).map(([key, value]) => [key.substring(folder.length), value]));
-            const context = new coreml.Context(this, identifier, value, locals, protobuf);
-            /* eslint-disable no-await-in-loop */
-            const type = await factory.match(context);
-            /* eslint-enable no-await-in-loop */
+        const streams = new Map();
+        for (const [path, location] of entries) {
+            streams.set(path, this.stream(location.offset, location.size));
+        }
+        const context = this.target.context;
+        for (const [key] of streams) {
+            const content = context.context(key, streams.get(key), streams);
+            // eslint-disable-next-line no-await-in-loop
+            const type = await factory.match(content);
             if (type === 'coreml.manifest') {
-                /* eslint-disable no-await-in-loop */
-                const model = await factory.open(context);
-                /* eslint-enable no-await-in-loop */
+                // eslint-disable-next-line no-await-in-loop
+                const model = await factory.open(content);
                 [this.type] = model.modules;
                 this.type.name = 'CoreMLBackend';
                 return;
@@ -1024,75 +1053,6 @@ coreml.Reader = class {
     }
 };
 
-coreml.Context = class {
-
-    constructor(reader, identifier, location, entries, protobuf) {
-        this._reader = reader;
-        this._location = location;
-        this._identifier = identifier;
-        this._entries = entries;
-        this._protobuf = protobuf;
-    }
-
-    get identifier() {
-        return this._identifier;
-    }
-
-    get stream() {
-        if (!this._stream) {
-            this._stream = this._reader.stream(this._location.offset, this._location.size);
-        }
-        return this._stream;
-    }
-
-    async tags(type) {
-        if (type === 'pb' && this.identifier.endsWith('.mlmodel')) {
-            return new Map([[1,0],[2,2]]);
-        }
-        return new Map();
-    }
-
-    async peek(type) {
-        if (type === 'json') {
-            const data = this.stream.peek();
-            const decoder = new TextDecoder('utf-8');
-            const text = decoder.decode(data);
-            return JSON.parse(text);
-        }
-        return null;
-    }
-
-    async read(type) {
-        if (type === 'protobuf.binary') {
-            return this._protobuf.BinaryReader.open(this.stream);
-        }
-        return null;
-    }
-
-    async fetch(file) {
-        if (this._entries.has(file)) {
-            const location = this._entries.get(file);
-            const identifier = file.split('/').pop();
-            return new coreml.Context(this._reader, identifier, location, this._entries, this._protobuf);
-        }
-        return null;
-    }
-
-    async require(id) {
-        return this._reader.target.context.require(id);
-    }
-
-    async metadata(name) {
-        return this._reader.target.context.metadata(name);
-    }
-
-    set(type, value) {
-        this.type = type;
-        this.value = value;
-        return type;
-    }
-};
-
 qnn.Reader = class {
 
     static open(data, target) {
@@ -1115,7 +1075,215 @@ qnn.Reader = class {
 
     async read() {
         // https://github.com/pytorch/executorch/blob/main/backends/qualcomm/runtime/backends/QnnCustomProtocol.h
-        throw new executorch.Error('QNN backend not implemented.');
+        throw new executorch.Error('Undocumented QNN backend not implemented.');
+    }
+};
+
+qnn.Graph = class {
+
+    constructor() {
+        this.name = 'QnnBackend';
+        this.inputs = [];
+        this.outputs = [];
+        this.nodes = [];
+    }
+};
+
+ethosu.Reader = class {
+
+    static open(data /* , target */) {
+        if (data.length >= 32) {
+            const reader = base.BinaryReader.open(data);
+            const magicBuffer = reader.read(16);
+            const magic = String.fromCharCode(...magicBuffer).replace(/\0/g, '');
+            if (magic === 'vela_bin_stream') {
+                return new ethosu.Reader(reader, data.length);
+            }
+        }
+        return null;
+    }
+
+    constructor(reader, size) {
+        this.reader = reader;
+        this.size = size;
+    }
+
+    async read() {
+        this.reader.seek(0);
+        const blocks = new Map();
+        while (this.reader.position < this.size) {
+            const nameBuffer = this.reader.read(16);
+            const name = String.fromCharCode(...nameBuffer).replace(/\0/g, '');
+            const size = this.reader.uint32();
+            this.reader.skip(12);
+            const data = this.reader.read(size);
+            blocks.set(name, data);
+            const padding = (16 - (size % 16)) % 16;
+            this.reader.skip(padding);
+            if (name === 'vela_end_stream') {
+                break;
+            }
+        }
+        const args = (data) => {
+            if (data && data.length >= 4) {
+                const reader = base.BinaryReader.open(data);
+                const count = reader.int32();
+                const arg = [];
+                for (let i = 0; i < count; i++) {
+                    const shape = [];
+                    for (let j = 0; j < 6; j++) {
+                        shape.push(reader.int32());
+                    }
+                    const elem_size = reader.int32();
+                    const offset = reader.int32();
+                    const region = reader.int32();
+                    arg.push({ shape, elem_size, offset, region });
+                }
+                return arg;
+            }
+            return [];
+        };
+        const inputs = args(blocks.get('inputs'));
+        const outputs = args(blocks.get('outputs'));
+        this.type = new ethosu.Graph(inputs, outputs);
+    }
+};
+
+ethosu.Graph = class {
+
+    constructor(inputs, outputs) {
+        this.name = 'EthosUBackend';
+        this.inputs = [];
+        this.outputs = [];
+        this.nodes = [];
+        for (let i = 0; i < inputs.length; i++) {
+            const input = inputs[i];
+            const type = new ethosu.TensorType(input);
+            const value = new ethosu.Value(i.toString(), type, null);
+            const name = inputs.length === 1 ? 'input' : `input.${i}`;
+            const argument = new ethosu.Argument(name, [value]);
+            this.inputs.push(argument);
+        }
+        for (let i = 0; i < outputs.length; i++) {
+            const output = outputs[i];
+            const type = new ethosu.TensorType(output);
+            const value = new ethosu.Value((inputs.length + i).toString(), type, null);
+            const name = outputs.length === 1 ? 'output' : `output.${i}`;
+            const argument = new ethosu.Argument(name, [value]);
+            this.outputs.push(argument);
+        }
+    }
+};
+
+ethosu.Argument = class {
+
+    constructor(name, value, type = null, visible = true) {
+        this.name = name;
+        this.value = value;
+        this.type = type;
+        this.visible = visible;
+    }
+};
+
+ethosu.Value = class Value {
+
+    constructor(name, type, initializer = null) {
+        if (typeof name !== 'string') {
+            throw new executorch.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
+        }
+        this.name = name;
+        this.type = initializer && initializer.type ? initializer.type : type || null;
+        this.initializer = initializer;
+    }
+};
+
+ethosu.TensorType = class {
+
+    constructor(io) {
+        switch (io.elem_size) {
+            case 1: this.dataType = 'int8'; break;
+            case 2: this.dataType = 'int16'; break;
+            case 4: this.dataType = 'int32'; break;
+            default: this.dataType = `?${io.elem_size}`; break;
+        }
+        const shape = io.shape.filter((dim, index) => dim !== 1 || index === io.shape.length - 1 || io.shape.slice(index).some((d) => d !== 1));
+        this.shape = new ethosu.TensorShape(shape.length > 0 ? shape : [1]);
+    }
+
+    toString() {
+        return this.dataType + this.shape.toString();
+    }
+};
+
+ethosu.TensorShape = class {
+
+    constructor(dimensions = []) {
+        this.dimensions = dimensions;
+    }
+
+    toString() {
+        if (this.dimensions && this.dimensions.length > 0) {
+            return `[${this.dimensions.map((dimension) => dimension.toString()).join(',')}]`;
+        }
+        return '';
+    }
+};
+
+ethosu.Error = class extends Error {
+
+    constructor(message) {
+        super(message);
+        this.name = 'Error loading Ethos-U model.';
+    }
+};
+
+openvino.Reader = class {
+
+    static open(data /* , target */) {
+        return new openvino.Reader(data);
+    }
+
+    constructor(data) {
+        this.data = data;
+    }
+
+    async read() {
+        throw new executorch.Error('OpenVINO backend not implemented.');
+    }
+};
+
+openvino.Graph = class {
+
+    constructor() {
+        this.name = 'OpenvinoBackend';
+        this.inputs = [];
+        this.outputs = [];
+        this.nodes = [];
+    }
+};
+
+rockchip.Reader = class {
+
+    static open(data /* , target */) {
+        return new rockchip.Reader(data);
+    }
+
+    constructor(data) {
+        this.data = data;
+    }
+
+    async read() {
+        throw new executorch.Error('Rockchip backend not implemented.');
+    }
+};
+
+rockchip.Graph = class {
+
+    constructor() {
+        this.name = 'RockchipBackend';
+        this.inputs = [];
+        this.outputs = [];
+        this.nodes = [];
     }
 };
 

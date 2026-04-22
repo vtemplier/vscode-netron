@@ -101,6 +101,8 @@ paddle.ModelFactory = class {
                                 reader.field = function(tag, message) {
                                     if (message instanceof paddle.proto.VarType && tag === 'lod_tensor') {
                                         message.dense_tensor = paddle.proto.VarType.DenseTensorDesc.decodeText(reader);
+                                    } else if (message instanceof paddle.proto.VarType.DenseTensorDesc && tag === 'lod_level') {
+                                        message.legacy_lod_level = reader.int32();
                                     } else {
                                         throw new Error(`Unknown field '${tag}' ${this.location()}`);
                                     }
@@ -352,19 +354,25 @@ paddle.Graph = class {
             for (const op of block.ops) {
                 if (op.type === 'feed') {
                     let name = '';
-                    if (op.kind === 'op') {
-                        name = op.attrs.filter((attr) => attr.name === 'col')[0].irValue.toString();
-                    } else {
-                        name = op.attrs.filter((attr) => attr.name === 'col')[0].i.toString();
+                    const attr = op.attrs.find((attr) => attr.name === 'col');
+                    if (attr) {
+                        if (op.kind === 'op') {
+                            name = attr.irValue.toString();
+                        } else {
+                            name = attr.i.toString();
+                        }
                     }
                     const argument = new paddle.Argument(name, op.outputs[0].arguments.map((id) => values.get(id)));
                     this.inputs.push(argument);
                 } else if (op.type === 'fetch') {
                     let name = '';
-                    if (op.kind === 'op') {
-                        name = op.attrs.filter((attr) => attr.name === 'col')[0].irValue.toString();
-                    } else {
-                        name = op.attrs.filter((attr) => attr.name === 'col')[0].i.toString();
+                    const attr = op.attrs.find((attr) => attr.name === 'col');
+                    if (attr) {
+                        if (op.kind === 'op') {
+                            name = attr.irValue.toString();
+                        } else {
+                            name = attr.i.toString();
+                        }
                     }
                     const argument = new paddle.Argument(name, op.inputs[0].arguments.map((id) => values.get(id)));
                     this.outputs.push(argument);
@@ -433,13 +441,13 @@ paddle.Argument = class {
 
 paddle.Value = class {
 
-    constructor(name, type, initializer) {
+    constructor(name, type, initializer = null) {
         if (typeof name !== 'string') {
             throw new paddle.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
         this.name = name;
         this.type = !type && initializer ? initializer.type : type;
-        this.initializer = initializer || null;
+        this.initializer = initializer;
     }
 };
 
@@ -586,10 +594,10 @@ paddle.Node = class {
 
 paddle.Tensor = class {
 
-    constructor(type, data, category) {
+    constructor(type, data, category = '') {
         this.type = type;
         this.values = data;
-        this.category = category || '';
+        this.category = category;
     }
 };
 
@@ -753,7 +761,7 @@ paddle.NaiveBuffer = class {
         const stream = context.stream;
         if (stream && stream.length > 4) {
             const buffer = stream.peek(4);
-            if (buffer[0] > 2 || buffer[1] !== 0x00 || buffer[2] !== 0x76 || buffer[2] !== 0x32) {
+            if (buffer[0] > 2 || buffer[1] !== 0x00 || buffer[2] !== 0x76 || buffer[3] !== 0x32) {
                 if (context.identifier === '__model__.nb') {
                     return new paddle.NaiveBuffer('paddle.naive.model', stream, -1);
                 }
@@ -1247,8 +1255,8 @@ paddle.IR = class {
             case 'i16': return 'int16';
             case 'i32': return 'int32';
             case 'i64': return 'int64';
-            case 'c64': return 'complex64';
-            case 'c128': return 'complex128';
+            case 'c64': return 'complex<float32>';
+            case 'c128': return 'complex<float64>';
             case 'str': return 'string';
             default: return type;
         }

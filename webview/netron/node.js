@@ -29,19 +29,21 @@ node.FileStream = class {
 
     seek(position) {
         this._position = position >= 0 ? position : this._length + position;
+        if (this._position > this._length || this._position < 0) {
+            throw new Error(`Expected ${this._position - this._length} more bytes. The file might be corrupted. Unexpected end of file.`);
+        }
     }
 
     skip(offset) {
         this._position += offset;
-        if (this._position > this._length) {
-            const offset = this._position - this._length;
-            throw new Error(`Expected ${offset} more bytes. The file might be corrupted. Unexpected end of file.`);
+        if (this._position > this._length || this._position < 0) {
+            throw new Error(`Expected ${this._position - this._length} more bytes. The file might be corrupted. Unexpected end of file.`);
         }
     }
 
     peek(length) {
         length = length === undefined ? this._length - this._position : length;
-        if (length < 0x1000000) {
+        if (length < 0x10000000) {
             const position = this._fill(length);
             this._position -= length;
             return this._buffer.subarray(position, position + length);

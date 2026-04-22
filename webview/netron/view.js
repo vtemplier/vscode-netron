@@ -4,6 +4,7 @@ import * as grapher from './grapher.js';
 
 const view = {};
 const markdown = {};
+const png = {};
 const metadata = {};
 const metrics = {};
 
@@ -19,6 +20,8 @@ view.View = class {
             mousewheel: 'scroll'
         };
         this._options = { ...this._defaultOptions };
+        this._events = {};
+        this._events.selectionchange = () => this._selectionChangeHandler();
         this._model = null;
         this._path = [];
         this._selection = [];
@@ -58,18 +61,31 @@ view.View = class {
                     e.preventDefault();
                 }
             }, { passive: false });
-            this._host.document.addEventListener('keydown', () => {
-                if (this._target) {
+            this._host.document.addEventListener('keydown', (e) => {
+                if (this._target && !e.metaKey && !e.ctrlKey) {
                     this._target.select(null);
+                }
+            });
+            this._host.document.addEventListener('copy', (e) => {
+                const selection = this._host.document.getSelection();
+                if (!selection || selection.toString().trim() === '') {
+                    if (this._target && this._target.selection.size > 0) {
+                        const names = [];
+                        for (const element of this._target.selection) {
+                            if (element.value && element.value.name) {
+                                names.push(element.value.name);
+                            }
+                        }
+                        if (names.length > 0) {
+                            e.clipboardData.setData('text/plain', names.join('\n'));
+                            e.preventDefault();
+                        }
+                    }
                 }
             });
             if (this._host.type === 'Electron') {
                 this._host.update({ 'copy.enabled': false });
-                this._host.document.addEventListener('selectionchange', () => {
-                    const selection = this._host.document.getSelection();
-                    const selected = selection.rangeCount === 0 || selection.toString().trim() !== '';
-                    this._host.update({ 'copy.enabled': selected });
-                });
+                this._host.document.addEventListener('selectionchange', this._events.selectionchange);
             }
             const platform = this._host.environment('platform');
             this._menu = new view.Menu(this._host);
@@ -223,6 +239,12 @@ view.View = class {
         }
     }
 
+    dispose() {
+        if (this._worker) {
+            this._worker.cancel(true);
+        }
+    }
+
     get host() {
         return this._host;
     }
@@ -306,6 +328,7 @@ view.View = class {
     set target(value) {
         if (this._target !== value) {
             if (this._target) {
+                this._target.off('selectionchange', this._events.selectionchange);
                 this._target.unregister();
             }
             const enabled = value ? true : false;
@@ -316,6 +339,7 @@ view.View = class {
             });
             this._target = value;
             if (this._target) {
+                this._target.on('selectionchange', this._events.selectionchange);
                 this._target.register();
             }
         }
@@ -379,8 +403,17 @@ view.View = class {
 
     _timeout(delay) {
         return new Promise((resolve) => {
-            setTimeout(resolve, delay);
+            this._host.window.setTimeout(resolve, delay);
         });
+    }
+
+    _selectionChangeHandler() {
+        if (this._host.type === 'Electron') {
+            const selection = this._host.document.getSelection();
+            const text = selection.rangeCount === 0 || selection.toString().trim() !== '';
+            const graph = this._target && this._target.selection.size > 0;
+            this._host.update({ 'copy.enabled': text || graph });
+        }
     }
 
     _element(id) {
@@ -397,6 +430,258 @@ view.View = class {
 
     resetZoom() {
         this._target.zoom = 1;
+    }
+
+    async refresh(anchor) {
+        const snapshot = new Map();
+        if (this._target) {
+            for (const [key, entry] of this._target.nodes) {
+                const label = entry.label;
+                if (label && label.x !== undefined) {
+                    snapshot.set(label.value || key, {
+                        x: label.x, y: label.y,
+                        width: label.width || 0, height: label.height || 0
+                    });
+                }
+            }
+        }
+        const document = this._host.document;
+        const container = document.getElementById('target');
+        const zoom = this._target ? this._target._zoom : 1;
+        const blocks = this._target ? this._target.blocks : null;
+        if (blocks && blocks.size > 0 && this._path.length > 0) {
+            this._path[0].state = Object.assign(this._path[0].state || {}, { blocks });
+        }
+        const origin = document.getElementById('origin');
+        let previous = null;
+        if (origin && this.activeTarget) {
+            previous = origin.getScreenCTM();
+            const oldChildren = Array.from(origin.children);
+            const graph = this.activeTarget;
+            const groups = graph.groups || false;
+            const viewGraph = new view.Graph(this, groups);
+            const state = this._path && this._path.length > 0 && this._path[0] ? this._path[0].state : null;
+            if (state && state.blocks) {
+                viewGraph.blocks = state.blocks;
+            }
+            viewGraph.add(graph, this.activeSignature);
+            viewGraph.addTunnels();
+            viewGraph.build(document, origin);
+            await viewGraph.measure();
+            const status = await viewGraph.layout(this._worker);
+            if (status === '') {
+                for (const child of oldChildren) {
+                    if (child.parentNode === origin) {
+                        origin.removeChild(child);
+                    }
+                }
+                viewGraph.update();
+                viewGraph.updateTunnels();
+                origin.setAttribute('transform', 'translate(0,0) scale(1)');
+                document.getElementById('background').setAttribute('width', 0);
+                document.getElementById('background').setAttribute('height', 0);
+                viewGraph.restore(state);
+                this.target = viewGraph;
+            } else {
+                for (const child of Array.from(origin.children)) {
+                    if (!oldChildren.includes(child)) {
+                        origin.removeChild(child);
+                    }
+                }
+            }
+        } else {
+            await this.render(this.activeTarget, this.activeSignature);
+        }
+        this.show(null);
+        if (this._target) {
+            this._target.zoom = zoom;
+            if (container && anchor) {
+                const anchorNode = this._target.find(anchor.value);
+                if (anchorNode instanceof grapher.Node && anchorNode.element) {
+                    let newRect = anchorNode.element.getBoundingClientRect();
+                    if (anchorNode.definition && anchorNode.definition.element) {
+                        newRect = anchorNode.definition.element.getBoundingClientRect();
+                    }
+                    if (container.scrollWidth > container.clientWidth) {
+                        container.scrollLeft += (newRect.left - anchor.rect.left);
+                    }
+                    if (container.scrollHeight > container.clientHeight) {
+                        container.scrollTop += (newRect.top - anchor.rect.top);
+                    }
+                }
+                delete this._target._scrollLeft;
+                delete this._target._scrollTop;
+            }
+            const current = origin ? origin.getScreenCTM() : null;
+            const ox = previous && current ? (previous.e - current.e) / current.a : 0;
+            const oy = previous && current ? (previous.f - current.f) / current.d : 0;
+            const animateTransition = (snapshot) => {
+                if (!this._target || snapshot.size === 0) {
+                    return;
+                }
+                const duration = 300;
+                let startTime = 0;
+                const animations = [];
+                for (const [key, entry] of this._target.nodes) {
+                    const label = entry.label;
+                    if (!label || !label.element) {
+                        continue;
+                    }
+                    const modelKey = label.value || key;
+                    const old = snapshot.get(modelKey);
+                    const isCluster = this._target.children(key).length > 0;
+                    if (old) {
+                        if (isCluster) {
+                            animations.push({
+                                type: 'cluster', element: label.element, rect: label.rectangle,
+                                fromX: old.x + ox, fromY: old.y + oy, toX: label.x, toY: label.y,
+                                fromW: old.width, fromH: old.height, toW: label.width, toH: label.height
+                            });
+                        } else {
+                            const fw = old.width;
+                            const fh = old.height;
+                            const tw = label.width;
+                            const th = label.height;
+                            animations.push({
+                                type: 'node', element: label.element,
+                                fromX: old.x - fw / 2 + ox, fromY: old.y - fh / 2 + oy,
+                                toX: label.x - tw / 2, toY: label.y - th / 2
+                            });
+                        }
+                    } else {
+                        label.element.style.opacity = '0';
+                        animations.push({ type: 'fadein', element: label.element });
+                    }
+                }
+                for (const edge of this._target.edges.values()) {
+                    const label = edge.label;
+                    if (!label || !label.element) {
+                        continue;
+                    }
+                    const fromNode = snapshot.get(label.from.value || edge.v);
+                    const toNode = snapshot.get(label.to.value || edge.w);
+                    if (fromNode && toNode) {
+                        const newFrom = this._target.node(edge.v);
+                        const newTo = this._target.node(edge.w);
+                        if (newFrom && newTo) {
+                            const dfx = fromNode.x - newFrom.label.x;
+                            const dfy = fromNode.y - newFrom.label.y;
+                            const dtx = toNode.x - newTo.label.x;
+                            const dty = toNode.y - newTo.label.y;
+                            const edgeOx = (dfx + dtx) / 2 + ox;
+                            const edgeOy = (dfy + dty) / 2 + oy;
+                            if (Math.abs(edgeOx) > 0.5 || Math.abs(edgeOy) > 0.5) {
+                                const labelTransform = label.labelElement ? label.labelElement.getAttribute('transform') : null;
+                                animations.push({
+                                    type: 'edge', element: label.element,
+                                    hitTest: label.hitTest, labelElement: label.labelElement,
+                                    labelTransform,
+                                    fromX: edgeOx, fromY: edgeOy
+                                });
+                            }
+                        }
+                    } else {
+                        label.element.style.opacity = '0';
+                        animations.push({ type: 'fadein', element: label.element });
+                        if (label.hitTest) {
+                            label.hitTest.style.opacity = '0';
+                            animations.push({ type: 'fadein', element: label.hitTest });
+                        }
+                        if (label.labelElement) {
+                            label.labelElement.style.opacity = '0';
+                            animations.push({ type: 'fadein', element: label.labelElement });
+                        }
+                    }
+                }
+                for (const anim of animations) {
+                    if (anim.type === 'node') {
+                        anim.element.setAttribute('transform', `translate(${anim.fromX},${anim.fromY})`);
+                    } else if (anim.type === 'cluster') {
+                        anim.element.setAttribute('transform', `translate(${anim.fromX},${anim.fromY})`);
+                        if (anim.rect) {
+                            anim.rect.setAttribute('x', -anim.fromW / 2);
+                            anim.rect.setAttribute('y', -anim.fromH / 2);
+                            anim.rect.setAttribute('width', anim.fromW);
+                            anim.rect.setAttribute('height', anim.fromH);
+                        }
+                    } else if (anim.type === 'edge') {
+                        const t = `translate(${anim.fromX},${anim.fromY})`;
+                        anim.element.setAttribute('transform', t);
+                        if (anim.hitTest) {
+                            anim.hitTest.setAttribute('transform', t);
+                        }
+                        if (anim.labelElement) {
+                            anim.labelElement.setAttribute('transform', `translate(${anim.fromX},${anim.fromY}) ${anim.labelTransform || ''}`);
+                        }
+                    } else if (anim.type === 'fadein') {
+                        anim.element.style.opacity = '0';
+                    }
+                }
+                const tick = (now) => {
+                    if (!startTime) {
+                        startTime = now;
+                    }
+                    const elapsed = now - startTime;
+                    const t = Math.min(elapsed / duration, 1);
+                    const ease = 1 - Math.pow(1 - t, 3);
+                    for (const anim of animations) {
+                        if (anim.type === 'node') {
+                            const x = anim.fromX + (anim.toX - anim.fromX) * ease;
+                            const y = anim.fromY + (anim.toY - anim.fromY) * ease;
+                            anim.element.setAttribute('transform', `translate(${x},${y})`);
+                        } else if (anim.type === 'cluster') {
+                            const x = anim.fromX + (anim.toX - anim.fromX) * ease;
+                            const y = anim.fromY + (anim.toY - anim.fromY) * ease;
+                            anim.element.setAttribute('transform', `translate(${x},${y})`);
+                            if (anim.rect) {
+                                const w = anim.fromW + (anim.toW - anim.fromW) * ease;
+                                const h = anim.fromH + (anim.toH - anim.fromH) * ease;
+                                anim.rect.setAttribute('x', -w / 2);
+                                anim.rect.setAttribute('y', -h / 2);
+                                anim.rect.setAttribute('width', w);
+                                anim.rect.setAttribute('height', h);
+                            }
+                        } else if (anim.type === 'edge') {
+                            const x = anim.fromX * (1 - ease);
+                            const y = anim.fromY * (1 - ease);
+                            const tr = `translate(${x},${y})`;
+                            anim.element.setAttribute('transform', tr);
+                            if (anim.hitTest) {
+                                anim.hitTest.setAttribute('transform', tr);
+                            }
+                            if (anim.labelElement) {
+                                anim.labelElement.setAttribute('transform', `translate(${x},${y}) ${anim.labelTransform || ''}`);
+                            }
+                        } else if (anim.type === 'fadein') {
+                            anim.element.style.opacity = String(ease);
+                        }
+                    }
+                    if (t < 1) {
+                        this._host.window.requestAnimationFrame(tick);
+                    } else {
+                        for (const anim of animations) {
+                            if (anim.type === 'fadein') {
+                                anim.element.style.removeProperty('opacity');
+                            } else if (anim.type === 'edge') {
+                                anim.element.removeAttribute('transform');
+                                if (anim.hitTest) {
+                                    anim.hitTest.removeAttribute('transform');
+                                }
+                                if (anim.labelElement) {
+                                    if (anim.labelTransform) {
+                                        anim.labelElement.setAttribute('transform', anim.labelTransform);
+                                    } else {
+                                        anim.labelElement.removeAttribute('transform');
+                                    }
+                                }
+                            }
+                        }
+                    }
+                };
+                this._host.window.requestAnimationFrame(tick);
+            };
+            animateTransition(snapshot);
+        }
     }
 
     async error(error, name, screen) {
@@ -459,12 +744,17 @@ view.View = class {
             }
             await this._timeout(20);
             const path = [];
-            if (Array.isArray(model.modules) && model.modules.length > 0) {
-                const [graph] = model.modules;
-                const signature = Array.isArray(graph.signatures) && graph.signatures.length > 0 ? graph.signatures[0] : null;
-                path.push({ target: graph, signature });
-            } else if (Array.isArray(model.functions) && model.functions.length > 0) {
-                path.push({ target: model.functions[0], signature: null });
+            const modules = Array.isArray(model.functions) ? model.modules.concat(model.functions) : model.modules;
+            let target = modules.length > 0 ? modules[0] : null;
+            for (const module of modules) {
+                if (Array.isArray(module.nodes) && module.nodes.length > 0) {
+                    target = module;
+                    break;
+                }
+            }
+            if (target) {
+                const signature = Array.isArray(target.signatures) && target.signatures.length > 0 ? target.signatures[0] : null;
+                path.push({ target, signature });
             }
             return await this._updateTarget(model, path);
         } catch (error) {
@@ -546,15 +836,16 @@ view.View = class {
                 back.style.opacity = 1;
                 const last = this._path.length - 2;
                 const count = Math.min(2, last);
+                const document = this.host.document;
                 if (count < last) {
-                    const element = this._host.document.createElement('button');
+                    const element = document.createElement('button');
                     element.setAttribute('class', 'toolbar-path-name-button');
                     element.innerHTML = '&hellip;';
                     path.appendChild(element);
                 }
                 for (let i = count; i >= 0; i--) {
                     const target = this._path[i].target;
-                    const element = this._host.document.createElement('button');
+                    const element = document.createElement('button');
                     element.setAttribute('class', 'toolbar-path-name-button');
                     element.addEventListener('click', async () => {
                         if (i > 0) {
@@ -578,7 +869,11 @@ view.View = class {
                         element.appendChild(text);
                     } else {
                         element.removeAttribute('title');
-                        element.textContent = name;
+                        if (name) {
+                            element.textContent = name;
+                        } else {
+                            element.innerHTML = '&nbsp;';
+                        }
                     }
                     path.appendChild(element);
                 }
@@ -600,7 +895,7 @@ view.View = class {
         if (graph && graph !== this.activeTarget && Array.isArray(graph.nodes)) {
             this._sidebar.close();
             if (context && this._path.length > 0) {
-                this._path[0].state = { context, zoom: this._target.zoom };
+                this._path[0].state = { context, zoom: this._target.zoom, blocks: this._target.blocks };
             }
             const signature = Array.isArray(graph.signatures) && graph.signatures.length > 0 ? graph.signatures[0] : null;
             const entry = { target: graph, signature };
@@ -634,13 +929,18 @@ view.View = class {
                 graph_skip: 0
             });
             const viewGraph = new view.Graph(this, groups);
+            const state = this._path && this._path.length > 0 && this._path[0] ? this._path[0].state : null;
+            if (state && state.blocks) {
+                viewGraph.blocks = state.blocks;
+            }
             viewGraph.add(graph, signature);
+            viewGraph.addTunnels();
             viewGraph.build(document);
             await viewGraph.measure();
             status = await viewGraph.layout(this._worker);
             if (status === '') {
                 viewGraph.update();
-                const state = this._path && this._path.length > 0 && this._path[0] && this._path[0].state ? this._path[0].state : null;
+                viewGraph.updateTunnels();
                 viewGraph.restore(state);
                 this.target = viewGraph;
             }
@@ -649,6 +949,7 @@ view.View = class {
     }
 
     async export(file) {
+        const window = this.host.window;
         const lastIndex = file.lastIndexOf('.');
         const extension = lastIndex === -1 ? 'png' : file.substring(lastIndex + 1).toLowerCase();
         if (this.activeTarget && (extension === 'png' || extension === 'svg')) {
@@ -704,43 +1005,74 @@ view.View = class {
             background.setAttribute('width', width);
             background.setAttribute('height', height);
             background.setAttribute('fill', '#fff');
-            const data = new XMLSerializer().serializeToString(clone);
+            const data = new window.XMLSerializer().serializeToString(clone);
             if (extension === 'svg') {
-                const blob = new Blob([data], { type: 'image/svg' });
+                const blob = new window.Blob([data], { type: 'image/svg' });
                 await this._host.export(file, blob);
             }
             if (extension === 'png') {
-                try {
-                    const blob = await new Promise((resolve, reject) => {
-                        const image = new Image();
-                        image.onload = async () => {
-                            const max = Math.max(width, height);
-                            const scale = Math.min(24000.0 / max, 2.0);
+                const blob = await new Promise((resolve, reject) => {
+                    this.show('welcome spinner');
+                    this.progress(0);
+                    const image = new window.Image();
+                    image.onload = async () => {
+                        try {
+                            let targetWidth = Math.ceil(width * 2);
+                            let targetHeight = Math.ceil(height * 2);
+                            let scale = 1;
+                            if (targetWidth > 100000 || targetHeight > 100000) {
+                                scale = Math.min(scale, 100000 / Math.max(targetWidth, targetHeight));
+                            }
+                            if (targetWidth * targetHeight * scale * scale > 500000000) {
+                                scale = Math.min(scale, Math.sqrt(500000000 / (targetWidth * targetHeight)));
+                            }
+                            if (scale < 1) {
+                                targetWidth = Math.floor(targetWidth * scale);
+                                targetHeight = Math.floor(targetHeight * scale);
+                            }
+                            const drawScale = targetWidth / width;
+                            const size = Math.min(targetWidth, 4096);
+                            const encoder = new png.Encoder(window, targetWidth, targetHeight);
                             const canvas = this._host.document.createElement('canvas');
-                            canvas.width = Math.ceil(width * scale);
-                            canvas.height = Math.ceil(height * scale);
+                            canvas.width = size;
+                            canvas.height = 4096;
                             const context = canvas.getContext('2d');
-                            context.scale(scale, scale);
-                            context.drawImage(image, 0, 0);
-                            canvas.toBlob((blob) => {
-                                if (blob) {
-                                    resolve(blob);
-                                } else {
-                                    const error = new Error('Image may be too large to render as PNG.');
-                                    error.name = 'Error exporting image.';
-                                    reject(error);
+                            for (let y = 0; y < targetHeight; y += 4096) {
+                                const h = Math.min(4096, targetHeight - y);
+                                const data = new Uint8Array(targetWidth * h * 4);
+                                for (let x = 0; x < targetWidth; x += size) {
+                                    const w = Math.min(size, targetWidth - x);
+                                    context.setTransform(drawScale, 0, 0, drawScale, -x, -y);
+                                    context.drawImage(image, 0, 0);
+                                    const tileData = context.getImageData(0, 0, w, h);
+                                    for (let row = 0; row < h; row++) {
+                                        const src = row * w * 4;
+                                        const dst = row * targetWidth * 4 + x * 4;
+                                        data.set(tileData.data.subarray(src, src + w * 4), dst);
+                                    }
                                 }
-                            }, 'image/png');
-                        };
-                        image.onerror = (error) => {
+                                /* eslint-disable-next-line no-await-in-loop */
+                                await encoder.write(data, h);
+                                this.progress((y + h) / targetHeight * 100);
+                            }
+                            const buffer = await encoder.toBuffer();
+                            this.progress(0);
+                            this.show('default');
+                            resolve(new window.Blob([buffer], { type: 'image/png' }));
+                        } catch (error) {
+                            this.progress(0);
+                            this.show('default');
                             reject(error);
-                        };
-                        image.src = `data:image/svg+xml;base64,${this._host.window.btoa(unescape(encodeURIComponent(data)))}`;
-                    });
-                    await this._host.export(file, blob);
-                } catch (error) {
-                    await this.error(error);
-                }
+                        }
+                    };
+                    image.onerror = (error) => {
+                        this.progress(0);
+                        this.show('default');
+                        reject(error);
+                    };
+                    image.src = `data:image/svg+xml;base64,${this._host.window.btoa(unescape(encodeURIComponent(data)))}`;
+                });
+                await this._host.export(file, blob);
             }
         }
     }
@@ -757,12 +1089,12 @@ view.View = class {
         }
     }
 
-    showTargetProperties() {
-        if (this._sidebar.identifier === 'target') {
+    showTargetProperties(target) {
+        if (this._sidebar.identifier === 'target' && !target) {
             this.showModelProperties();
             return;
         }
-        const target = this.activeTarget;
+        target = target || this.activeTarget;
         if (!target) {
             return;
         }
@@ -926,6 +1258,7 @@ view.Menu = class {
         this.items = [];
         this._darwin = host.environment('platform') === 'darwin';
         this._document = host.document;
+        this._window = host.window;
         this._stack = [];
         this._root = [];
         this._buttons = [];
@@ -1130,6 +1463,7 @@ view.Menu = class {
     }
 
     _execute(action) {
+        const window = this._window;
         if (typeof action === 'function') {
             action();
             return true;
@@ -1147,7 +1481,7 @@ view.Menu = class {
             }
             case 'command': {
                 this.close();
-                setTimeout(() => action.execute(), 10);
+                window.setTimeout(() => action.execute(), 10);
                 return true;
             }
             default: {
@@ -1440,18 +1774,19 @@ view.Worker = class {
             resolve({ type: 'terminate' });
             delete this._resolve;
             delete this._reject;
-            this._cancel(true);
+            this.cancel(true);
         } else {
-            this._cancel(false);
+            this.cancel(false);
         }
         return new Promise((resolve, reject) => {
             this._resolve = resolve;
             this._reject = reject;
             this._create();
             this._worker.postMessage(message);
-            this._timeout = setTimeout(async () => {
+            const window = this._host.window;
+            this._timeout = window.setTimeout(async () => {
                 await this._host.message(notification, null, 'Cancel');
-                this._cancel(true);
+                this.cancel(true);
                 delete this._resolve;
                 delete this._reject;
                 resolve({ type: 'cancel' });
@@ -1463,7 +1798,7 @@ view.Worker = class {
         if (!this._worker) {
             this._worker = this._host.worker('./worker');
             this._worker.addEventListener('message', (e) => {
-                this._cancel(false);
+                this.cancel(false);
                 const message = e.data;
                 const resolve = this._resolve;
                 const reject = this._reject;
@@ -1477,7 +1812,7 @@ view.Worker = class {
                 }
             });
             this._worker.addEventListener('error', (e) => {
-                this._cancel(true);
+                this.cancel(true);
                 const reject = this._reject;
                 delete this._resolve;
                 delete this._reject;
@@ -1488,14 +1823,13 @@ view.Worker = class {
         }
     }
 
-    _cancel(terminate) {
-        terminate = terminate || this._host.type === 'Test';
+    cancel(terminate) {
         if (this._worker && terminate) {
             this._worker.terminate();
             this._worker = null;
         }
         if (this._timeout !== -1) {
-            clearTimeout(this._timeout);
+            this._host.window.clearTimeout(this._timeout);
             this._timeout = -1;
             this._host.message();
         }
@@ -1513,7 +1847,28 @@ view.Graph = class extends grapher.Graph {
         this._tensors = new Map();
         this._table = new Map();
         this._selection = new Set();
+        this.blocks = new Set();
         this._zoom = 1;
+        this._listeners = {};
+    }
+
+    on(event, callback) {
+        this._listeners[event] = this._listeners[event] || [];
+        this._listeners[event].push(callback);
+    }
+
+    off(event, callback) {
+        if (this._listeners[event]) {
+            this._listeners[event] = this._listeners[event].filter((c) => c !== callback);
+        }
+    }
+
+    emit(event, data) {
+        if (this._listeners[event]) {
+            for (const callback of this._listeners[event]) {
+                callback(this, data);
+            }
+        }
     }
 
     get model() {
@@ -1528,6 +1883,14 @@ view.Graph = class extends grapher.Graph {
         return this.view.options;
     }
 
+    get values() {
+        return this._values;
+    }
+
+    get selection() {
+        return this._selection;
+    }
+
     createNode(node) {
         const obj = new view.Node(this, node);
         obj.name = (this._nodeKey++).toString();
@@ -1535,8 +1898,8 @@ view.Graph = class extends grapher.Graph {
         return obj;
     }
 
-    createGraph(graph) {
-        const obj = new view.Node(this, graph, 'graph');
+    createGraph(graph, type) {
+        const obj = new view.Node(this, graph, type || 'graph');
         obj.name = (this._nodeKey++).toString();
         this._table.set(graph, obj);
         return obj;
@@ -1582,7 +1945,27 @@ view.Graph = class extends grapher.Graph {
         return null;
     }
 
+    find(value) {
+        if (this._table.has(value)) {
+            return this._table.get(value);
+        }
+        for (const obj of this._table.values()) {
+            if (obj instanceof grapher.Node) {
+                for (const block of obj.blocks) {
+                    if (block instanceof view.Block) {
+                        const found = block.target.find(value);
+                        if (found) {
+                            return found;
+                        }
+                    }
+                }
+            }
+        }
+        return null;
+    }
+
     add(graph, signature) {
+        this.target = graph;
         this.identifier = this.model.identifier;
         this.identifier += graph && graph.name ? `.${graph.name.replace(/\/|\\/g, '.')}` : '';
         const clusters = new Set();
@@ -1687,32 +2070,273 @@ view.Graph = class extends grapher.Graph {
         }
     }
 
-    build(document) {
-        const element = document.getElementById('target');
-        while (element.lastChild) {
-            element.removeChild(element.lastChild);
+    addTunnels() {
+        this._tunnels = [];
+        const subgraphOuterRefs = (graph) => {
+            const produced = new Set();
+            if (Array.isArray(graph.inputs)) {
+                for (const arg of graph.inputs) {
+                    if (!Array.isArray(arg.value)) {
+                        continue;
+                    }
+                    for (const val of arg.value) {
+                        if (val.name) {
+                            produced.add(val.name);
+                        }
+                    }
+                }
+            }
+            for (const node of (graph.nodes || [])) {
+                for (const arg of (node.outputs || [])) {
+                    if (!Array.isArray(arg.value)) {
+                        continue;
+                    }
+                    for (const val of arg.value) {
+                        if (val.name) {
+                            produced.add(val.name);
+                        }
+                    }
+                }
+            }
+            const refs = new Set();
+            for (const node of (graph.nodes || [])) {
+                for (const arg of (node.inputs || [])) {
+                    if (!Array.isArray(arg.value)) {
+                        continue;
+                    }
+                    for (const val of arg.value) {
+                        if (val.name && !val.initializer && !produced.has(val.name)) {
+                            refs.add(val.name);
+                        }
+                    }
+                }
+            }
+            return refs;
+        };
+        // Collect tunnel refs per (source, parent, attrName)
+        const seen = new Set();
+        for (const entry of this._nodes.values()) {
+            const node = entry.label;
+            if (!(node instanceof view.Node)) {
+                continue;
+            }
+            const modelNode = node.value;
+            const subgraphs = (modelNode.attributes || []).concat(modelNode.blocks || []);
+            for (const attr of subgraphs) {
+                if (attr.type !== 'graph' || !attr.value) {
+                    continue;
+                }
+                const refs = subgraphOuterRefs(attr.value);
+                for (const valueName of refs) {
+                    const outerValue = this._values.get(valueName);
+                    if (!outerValue || !outerValue.from) {
+                        continue;
+                    }
+                    const sourceNode = outerValue.from;
+                    const refKey = `${sourceNode.name}:${node.name}:${attr.name}`;
+                    if (seen.has(refKey)) {
+                        continue;
+                    }
+                    seen.add(refKey);
+                    const edge = sourceNode.edge(node);
+                    if (!edge._tunnel) {
+                        edge._tunnel = true;
+                    }
+                    const edgeKey = `${edge.v}:${edge.w}`;
+                    if (!this._edges.has(edgeKey)) {
+                        this.setEdge(edge);
+                    }
+                    this._tunnels.push({
+                        sourceNode,
+                        parentNode: node,
+                        attrName: attr.name,
+                        valueName,
+                        edge
+                    });
+                }
+            }
         }
-        const canvas = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-        canvas.setAttribute('id', 'canvas');
-        canvas.setAttribute('class', 'canvas');
-        canvas.setAttribute('preserveAspectRatio', 'xMidYMid meet');
-        canvas.setAttribute('width', '100%');
-        canvas.setAttribute('height', '100%');
-        element.appendChild(canvas);
-        // Workaround for Safari background drag/zoom issue:
-        // https://stackoverflow.com/questions/40887193/d3-js-zoom-is-not-working-with-mousewheel-in-safari
-        const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-        background.setAttribute('id', 'background');
-        background.setAttribute('fill', 'none');
-        background.setAttribute('pointer-events', 'all');
-        canvas.appendChild(background);
-        const origin = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        origin.setAttribute('id', 'origin');
-        canvas.appendChild(origin);
+    }
+
+    updateTunnels() {
+        if (!this._tunnelGroup || !this._tunnels || !this._document) {
+            return;
+        }
+        while (this._tunnelGroup.lastChild) {
+            this._tunnelGroup.removeChild(this._tunnelGroup.lastChild);
+        }
+        if (this._tunnels.length === 0) {
+            return;
+        }
+        const document = this._document;
+        const defs = document.createElementNS('http://www.w3.org/2000/svg', 'defs');
+        const marker = document.createElementNS('http://www.w3.org/2000/svg', 'marker');
+        marker.setAttribute('id', 'arrowhead-tunnel');
+        marker.setAttribute('viewBox', '0 0 10 10');
+        marker.setAttribute('refX', 9);
+        marker.setAttribute('refY', 5);
+        marker.setAttribute('markerUnits', 'strokeWidth');
+        marker.setAttribute('markerWidth', 8);
+        marker.setAttribute('markerHeight', 6);
+        marker.setAttribute('orient', 'auto');
+        const markerPath = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        markerPath.setAttribute('d', 'M 0 0 L 10 5 L 0 10 L 4 5 z');
+        markerPath.style.setProperty('stroke-width', 1);
+        marker.appendChild(markerPath);
+        defs.appendChild(marker);
+        this._tunnelGroup.appendChild(defs);
+        const intersectRect = (node, point) => {
+            const dx = point.x - node.x;
+            const dy = point.y - node.y;
+            let h = node.height / 2;
+            let w = node.width / 2;
+            if (Math.abs(dy) * w > Math.abs(dx) * h) {
+                if (dy < 0) {
+                    h = -h;
+                }
+                return { x: node.x + (dy === 0 ? 0 : h * dx / dy), y: node.y + h };
+            }
+            if (dx < 0) {
+                w = -w;
+            }
+            return { x: node.x + w, y: node.y + (dx === 0 ? 0 : w * dy / dx) };
+        };
+        const findTarget = (node, attrName, valueName) => {
+            const nodeTop = node.y - node.height / 2;
+            const nodeLeft = node.x - node.width / 2;
+            for (const block of node.blocks) {
+                if (!block._items) {
+                    continue;
+                }
+                for (const item of block._items) {
+                    if (item.name !== attrName) {
+                        continue;
+                    }
+                    if (item.content && item.content.blocks) {
+                        for (const innerBlock of item.content.blocks) {
+                            if (innerBlock instanceof view.Block && innerBlock.target && innerBlock.target._values) {
+                                const innerValue = innerBlock.target._values.get(valueName);
+                                if (innerValue && innerValue.to.length > 0) {
+                                    const innerNode = innerValue.to[0];
+                                    if (innerNode.x !== undefined && innerNode.y !== undefined) {
+                                        const padding = innerBlock._padding || 10;
+                                        const originX = innerBlock.target.originX || 0;
+                                        const originY = innerBlock.target.originY || 0;
+                                        const contentNode = item.content;
+                                        const cx = nodeLeft + block.x + (contentNode.x - contentNode.width / 2);
+                                        const cy = nodeTop + block.y + (contentNode.y - contentNode.height / 2);
+                                        return {
+                                            x: cx + innerBlock.x + (padding - originX) + innerNode.x,
+                                            y: cy + innerBlock.y + (padding - originY) + innerNode.y,
+                                            width: innerNode.width || 0,
+                                            height: innerNode.height || 0
+                                        };
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (item.content && item.content.x !== undefined) {
+                        const contentNode = item.content;
+                        return {
+                            x: nodeLeft + block.x + contentNode.x,
+                            y: nodeTop + block.y + contentNode.y,
+                            width: contentNode.width,
+                            height: contentNode.height
+                        };
+                    }
+                    return {
+                        x: nodeLeft + block.x + item.x + item.width / 2,
+                        y: nodeTop + block.y + item.y + item.height / 2,
+                        width: item.width,
+                        height: item.height
+                    };
+                }
+            }
+            return { x: node.x, y: node.y, width: node.width || 0, height: node.height || 0 };
+        };
+        // Group tunnels by parent node to detect all overlaps into same target
+        const groups = new Map();
+        for (let i = 0; i < this._tunnels.length; i++) {
+            const ref = this._tunnels[i];
+            const key = ref.parentNode.name;
+            if (!groups.has(key)) {
+                groups.set(key, []);
+            }
+            groups.get(key).push(i);
+        }
+        for (let i = 0; i < this._tunnels.length; i++) {
+            const { parentNode, attrName, valueName, edge } = this._tunnels[i];
+            if (!edge.points || edge.points.length < 2) {
+                continue;
+            }
+            const target = findTarget(parentNode, attrName, valueName);
+            const points = [];
+            const inner = edge.points.slice(1, edge.points.length - 1);
+            if (inner.length > 0) {
+                points.push(intersectRect(edge.from, inner[0]));
+                points.push(...inner);
+            } else {
+                points.push(intersectRect(edge.from, edge.points[edge.points.length - 1]));
+            }
+            points.push(intersectRect(target, points[points.length - 1]));
+            // If multiple tunnels target the same parent, draw arcs to separate them
+            const group = groups.get(parentNode.name);
+            let pathData = '';
+            if (group && group.length > 1) {
+                const j = group.indexOf(i);
+                const end = points[points.length - 1];
+                const start = intersectRect(edge.from, end);
+                const dy = Math.abs(end.y - start.y);
+                const arcBase = Math.min(80, dy * 0.2);
+                const arc = (j - (group.length - 1) / 2) * arcBase;
+                const p = new grapher.Edge.Path();
+                p.moveTo(start.x, start.y);
+                p.bezierCurveTo(
+                    start.x, start.y + (end.y - start.y) * 0.33,
+                    end.x + arc, start.y + (end.y - start.y) * 0.67,
+                    end.x, end.y
+                );
+                pathData = p.data;
+            } else {
+                pathData = new grapher.Edge.Curve(points).path.data;
+            }
+            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+            path.setAttribute('class', 'edge-path edge-path-tunnel');
+            path.setAttribute('d', pathData);
+            path.setAttribute('marker-end', 'url(#arrowhead-tunnel)');
+            this._tunnelGroup.appendChild(path);
+        }
+    }
+
+    build(document, origin) {
+        if (!origin) {
+            const element = document.getElementById('target');
+            while (element.lastChild) {
+                element.removeChild(element.lastChild);
+            }
+            const canvas = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+            canvas.setAttribute('id', 'canvas');
+            canvas.setAttribute('class', 'canvas');
+            canvas.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+            canvas.setAttribute('width', '100%');
+            canvas.setAttribute('height', '100%');
+            element.appendChild(canvas);
+            // Workaround for Safari background drag/zoom issue:
+            // https://stackoverflow.com/questions/40887193/d3-js-zoom-is-not-working-with-mousewheel-in-safari
+            const background = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+            background.setAttribute('id', 'background');
+            background.setAttribute('fill', 'none');
+            background.setAttribute('pointer-events', 'all');
+            canvas.appendChild(background);
+            origin = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            origin.setAttribute('id', 'origin');
+            canvas.appendChild(origin);
+        }
         for (const value of this._values.values()) {
             value.build();
         }
-        super.build(document);
+        super.build(document, origin);
     }
 
     async measure() {
@@ -1735,12 +2359,29 @@ view.Graph = class extends grapher.Graph {
         await super.measure();
     }
 
-    select(selection) {
+    clearSelection() {
         if (this._selection.size > 0) {
             for (const element of this._selection) {
                 element.deselect();
             }
             this._selection.clear();
+        }
+        for (const entry of this._table.values()) {
+            if (entry instanceof grapher.Node) {
+                for (const block of entry.blocks) {
+                    if (block.target && block.target.clearSelection) {
+                        block.target.clearSelection();
+                    }
+                }
+            }
+        }
+    }
+
+    select(selection) {
+        if (selection && this.view.target && this.view.target !== this) {
+            this.view.target.clearSelection();
+        } else {
+            this.clearSelection();
         }
         if (selection) {
             let array = [];
@@ -1751,8 +2392,10 @@ view.Graph = class extends grapher.Graph {
                     this._selection.add(element);
                 }
             }
+            this.emit('selectionchange');
             return array;
         }
+        this.emit('selectionchange');
         return null;
     }
 
@@ -1825,7 +2468,7 @@ view.Graph = class extends grapher.Graph {
                 const element = elements[i];
                 const rect = element.getBoundingClientRect();
                 const width = Math.min(rect.width, bounds.width);
-                const height = Math.min(rect.width, bounds.width);
+                const height = Math.min(rect.height, bounds.height);
                 xs.push(rect.left + (width / 2));
                 ys.push(rect.top + (height / 2));
             }
@@ -1917,15 +2560,9 @@ view.Graph = class extends grapher.Graph {
         if (e.pointerType === 'touch' || e.buttons !== 1) {
             return;
         }
-        // Workaround for Firefox emitting 'pointerdown' event when scrollbar is pressed
-        if (e.originalTarget) {
-            try {
-                /* eslint-disable no-unused-expressions */
-                e.originalTarget.id;
-                /* eslint-enable no-unused-expressions */
-            } catch {
-                return;
-            }
+        // Workaround for Firefox emitting 'pointerdown' event when scrollbar is pressed and interfering with dragging
+        if (e.rangeParent === null) {
+            return;
         }
         const document = this.host.document;
         const container = document.getElementById('target');
@@ -2145,7 +2782,7 @@ view.Node = class extends grapher.Node {
         this.id = `node-${value.name ? `name-${value.name}` : `id-${(context.counter++)}`}`;
         this._add(value, type);
         const inputs = value.inputs;
-        if (type !== 'graph' && Array.isArray(inputs)) {
+        if (type !== 'graph' && type !== 'function' && Array.isArray(inputs)) {
             for (const argument of inputs) {
                 if (!argument.type || argument.type.endsWith('*')) {
                     if (Array.isArray(argument.value) && argument.value.length === 1 && argument.value[0].initializer) {
@@ -2185,7 +2822,7 @@ view.Node = class extends grapher.Node {
     }
 
     _add(value, type) {
-        const node = type === 'graph' ? { type: value } : value;
+        const node = (type === 'graph' || type === 'function') ? { type: value } : value;
         const options = this.context.options;
         const header =  this.header();
         const category = node.type && node.type.category ? node.type.category : '';
@@ -2205,26 +2842,45 @@ view.Node = class extends grapher.Node {
             content = `${begin}\u2026${end}`;
         }
         const styles = category ? ['node-item-type', `node-item-type-${category.toLowerCase()}`] : ['node-item-type'];
-        const title = header.add(null, styles, content, tooltip);
+        const title = header.add(null, styles);
+        title.content = content;
+        title.tooltip = tooltip;
         title.on('click', () => {
             this.context.activate(value);
         });
-        if (node.type.type || (Array.isArray(node.type.nodes) && node.type.nodes.length > 0)) {
+        if (type === 'graph') {
+            this.definition = header.add(null, styles);
+            this.definition.content = '\u25CB';
+            this.definition.tooltip = 'Show Graph';
+            this.definition.padding = 4;
+            this.definition.on('click', async () => await this.context.view.pushTarget(value, this.value));
+            const expanded = this.context.blocks.has(value);
+            const icon = expanded ? '\u2212' : '+';
+            const tooltip = expanded ? 'Collapse Graph' : 'Expand Graph';
+            this.expander = header.add(null, styles);
+            this.expander.content = icon;
+            this.expander.tooltip = tooltip;
+            this.expander.padding = 6;
+            this.expander.on('click', () => {
+                const rect = this.expander.element.getBoundingClientRect();
+                if (this.context.blocks.has(value)) {
+                    this.context.blocks.delete(value);
+                } else {
+                    this.context.blocks.add(value);
+                }
+                this.context.view.refresh({ value: this.value, rect });
+            });
+        } else if (node.type.type || (Array.isArray(node.type.nodes) && node.type.nodes.length > 0)) {
             let icon = '\u0192';
             let tooltip = 'Show Function Definition';
-            if (type === 'graph') {
-                icon = '\u25CB';
-                tooltip = 'Show Graph';
-            } else if (node.type.type === 'weights') {
+            if (node.type.type === 'weights') {
                 icon = '\u25CF';
                 tooltip = 'Show Weights';
             }
-            const definition = header.add(null, styles, icon, tooltip);
-            definition.on('click', async () => await this.context.view.pushTarget(node.type, this.value));
-        }
-        if (Array.isArray(node.nodes)) {
-            // this._expand = header.add(null, styles, '+', null);
-            // this._expand.on('click', () => this.toggle());
+            this.definition = header.add(null, styles);
+            this.definition.content = icon;
+            this.definition.tooltip = tooltip;
+            this.definition.on('click', async () => await this.context.view.pushTarget(node.type, this.value));
         }
         let current = null;
         const list = () => {
@@ -2253,6 +2909,7 @@ view.Node = class extends grapher.Node {
                 (Array.isArray(node.inputs) && node.inputs.length > 0) ||
                 (Array.isArray(node.outputs) && node.outputs.length > 0) ||
                 (Array.isArray(node.attributes) && node.attributes.length > 0) ||
+                (Array.isArray(node.blocks) && node.blocks.length > 0) ||
                 (Array.isArray(node.chain) && node.chain.length > 0) ||
                 (node.type && Array.isArray(node.type.nodes) && node.type.nodes.length > 0)) {
                 return true;
@@ -2265,9 +2922,11 @@ view.Node = class extends grapher.Node {
             for (const argument of inputs) {
                 const type = argument.type;
                 if (argument.visible !== false &&
-                    ((type === 'graph') ||
+                    ((type === 'graph' && argument.value) ||
                     (type === 'object' && isObject(argument.value)) ||
-                    (type === 'object[]' || type === 'function' || type === 'function[]'))) {
+                    (type === 'object[]' && Array.isArray(argument.value) && argument.value.length > 0) ||
+                    type === 'function' ||
+                    (type === 'function[]' && Array.isArray(argument.value) && argument.value.length > 0))) {
                     objects.push(argument);
                 } else if (options.weights && argument.visible !== false && argument.type !== 'attribute' && Array.isArray(argument.value) && argument.value.length === 1 && argument.value[0].initializer) {
                     const item = this.context.createArgument(argument);
@@ -2286,13 +2945,24 @@ view.Node = class extends grapher.Node {
             for (const argument of attributes) {
                 const type = argument.type;
                 if (argument.visible !== false &&
-                    ((type === 'graph') ||
-                    (type === 'object') ||
-                    type === 'object[]' || type === 'function' || type === 'function[]')) {
+                    ((type === 'graph' && argument.value) ||
+                    (type === 'object' && argument.value) ||
+                    ((type === 'object[]' || type === 'function' || type === 'function[]') && Array.isArray(argument.value) && argument.value.length > 0))) {
                     objects.push(argument);
                 } else if (options.attributes && argument.visible !== false) {
                     const item = attribute(argument);
                     list().add(item);
+                }
+            }
+        }
+        if (Array.isArray(node.blocks)) {
+            for (const argument of node.blocks) {
+                const type = argument.type;
+                if (argument.visible !== false &&
+                    ((type === 'graph' && argument.value) ||
+                    (type === 'object' && isObject(argument.value)) ||
+                    ((type === 'object[]' || type === 'function' || type === 'function[]') && Array.isArray(argument.value) && argument.value.length > 0))) {
+                    objects.push(argument);
                 }
             }
         }
@@ -2303,21 +2973,30 @@ view.Node = class extends grapher.Node {
         for (const argument of objects) {
             const type = argument.type;
             let content = null;
-            if (type === 'graph') {
+            if (type === 'graph' && this.context.blocks.has(argument.value)) {
                 content = this.context.createGraph(argument.value);
-                this.context.setNode(content);
+                content.blocks.push(new view.Block(this.context.view, argument.value, this.context.blocks));
+                content.activate = () => this.context.view.showTargetProperties(argument.value);
+                const item = list().argument(argument.name, content);
+                list().add(item);
+            } else if (type === 'graph' || type === 'function') {
+                content = this.context.createGraph(argument.value, type);
+                content.activate = () => this.context.view.showTargetProperties(argument.value);
+                const item = list().argument(argument.name, content);
+                list().add(item);
             } else if (type === 'graph[]') {
                 content = argument.value.map((value) => this.context.createGraph(value));
-            } else if (type === 'function' || argument.type === 'object') {
-                content = this.context.createNode(argument.value);
-            } else if (type === 'function[]' || argument.type === 'object[]') {
-                content = argument.value.map((value) => this.context.createNode(value));
+                const item = list().argument(argument.name, content);
+                list().add(item);
+            } else {
+                if (argument.type === 'object') {
+                    content = this.context.createNode(argument.value);
+                } else if (type === 'function[]' || argument.type === 'object[]') {
+                    content = argument.value.map((value) => this.context.createNode(value));
+                }
+                const item = list().argument(argument.name, content);
+                list().add(item);
             }
-            const item = list().argument(argument.name, content);
-            list().add(item);
-        }
-        if (Array.isArray(node.nodes) && node.nodes.length > 0) {
-            // this.canvas = this.canvas();
         }
         if (Array.isArray(node.chain) && node.chain.length > 0) {
             for (const innerNode of node.chain) {
@@ -2331,20 +3010,6 @@ view.Node = class extends grapher.Node {
         }
     }
 
-    toggle() {
-        this._expand.content = '-';
-        this.context.view.target = new view.Graph(this.context.view, false);
-        this.context.view.target.add(this.value);
-        // const document = this.element.ownerDocument;
-        // const parent = this.element.parentElement;
-        // this._target.build(document, parent);
-        // this._target.update();
-        this.canvas.width = 300;
-        this.canvas.height = 300;
-        this.layout();
-        this.context.update();
-    }
-
     activate() {
         this.context.view.showNodeProperties(this.value);
     }
@@ -2355,6 +3020,73 @@ view.Node = class extends grapher.Node {
             this._edges.set(to, new view.Edge(this, to));
         }
         return this._edges.get(to);
+    }
+};
+
+view.Block = class {
+
+    constructor(viewRef, target, blocks) {
+        this.target = new view.Graph(viewRef, false);
+        if (blocks) {
+            this.target.blocks = blocks;
+        }
+        this.target.add(target);
+        this.x = 0;
+        this.y = 0;
+    }
+
+    build(document, parent) {
+        this.element = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        this.element.setAttribute('class', 'node-block');
+        parent.appendChild(this.element);
+        if (!this.first) {
+            this.line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            this.line.setAttribute('class', 'node');
+            parent.appendChild(this.line);
+        }
+        this._background = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        this._background.setAttribute('class', 'node-block-background');
+        this.element.appendChild(this._background);
+        this._origin = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        this.element.appendChild(this._origin);
+        for (const value of this.target.values.values()) {
+            value.build();
+        }
+        this.target.build(document, this._origin);
+    }
+
+    async measure() {
+        for (const edge of this.target.edges.values()) {
+            if (edge.label.labelElement) {
+                const box = edge.label.labelElement.getBBox();
+                edge.label.width = box.width;
+                edge.label.height = box.height;
+            }
+        }
+        await this.target.measure();
+        await this.target.layout();
+        const padding = 10;
+        this._padding = padding;
+        this.width = (this.target.width || 0) + 2 * padding;
+        this.height = (this.target.height || 0) + 2 * padding;
+    }
+
+    async layout() {
+    }
+
+    update() {
+        const offsetX = this._padding - (this.target.originX || 0);
+        const offsetY = this._padding - (this.target.originY || 0);
+        this.element.setAttribute('transform', `translate(0,${this.y})`);
+        this._origin.setAttribute('transform', `translate(${offsetX},${offsetY})`);
+        this._background.setAttribute('d', grapher.Node.roundedRect(0, 0, this.width, this.height, false, false, this.last, this.last));
+        this.target.update();
+        if (this.line) {
+            this.line.setAttribute('x1', 0);
+            this.line.setAttribute('x2', this.width);
+            this.line.setAttribute('y1', this.y);
+            this.line.setAttribute('y2', this.y);
+        }
     }
 };
 
@@ -2371,9 +3103,15 @@ view.Input = class extends grapher.Node {
             name = name.split('/').pop();
         }
         const header = this.header();
-        const title = header.add(null, ['graph-item-input'], name, types);
-        title.on('click', () => this.context.view.showTargetProperties());
+        const title = header.add(null, ['graph-item-input']);
+        title.content = name;
+        title.tooltip = types;
+        title.on('click', () => this.context.view.showTargetProperties(this.target));
         this.id = `input-${name ? `name-${name}` : `id-${(view.Input.counter++)}`}`;
+    }
+
+    get target() {
+        return this.context.target === this.context.view.activeTarget ? null : this.context.target;
     }
 
     get class() {
@@ -2389,7 +3127,7 @@ view.Input = class extends grapher.Node {
     }
 
     activate() {
-        this.context.view.showTargetProperties();
+        this.context.view.showTargetProperties(this.target);
     }
 
     edge(to) {
@@ -2414,9 +3152,15 @@ view.Output = class extends grapher.Node {
                 name = name.split('/').pop();
             }
             const header = this.header();
-            const title = header.add(null, ['graph-item-output'], name, types);
-            title.on('click', () => this.context.view.showTargetProperties());
+            const title = header.add(null, ['graph-item-output']);
+            title.content = name;
+            title.tooltip = types;
+            title.on('click', () => this.context.view.showTargetProperties(this.target));
         }
+    }
+
+    get target() {
+        return this.context.target === this.context.view.activeTarget ? null : this.context.target;
     }
 
     get inputs() {
@@ -2428,7 +3172,7 @@ view.Output = class extends grapher.Node {
     }
 
     activate() {
-        this.context.view.showTargetProperties();
+        this.context.view.showTargetProperties(this.target);
     }
 };
 
@@ -2459,7 +3203,7 @@ view.Value = class {
                     type.shape.dimensions &&
                     type.shape.dimensions.length > 0 &&
                     type.shape.dimensions.every((dim) => !dim || Number.isInteger(dim) || typeof dim === 'bigint' || (typeof dim === 'string'))) {
-                    content = type.shape.dimensions.map((dim) => (dim !== null && dim !== undefined && dim !== -1) ? dim : '?').join('\u00D7');
+                    content = type.shape.dimensions.map((dim) => (dim !== null && dim !== undefined && dim !== -1 && dim !== -1n) ? dim : '?').join('\u00D7');
                     content = content.length > 16 ? '' : content;
                 }
                 if (this.context.options.names) {
@@ -2701,6 +3445,11 @@ view.Control = class {
         return element;
     }
 
+    createTextNode(data) {
+        const node = this._host.document.createTextNode(data);
+        return node;
+    }
+
     on(event, callback) {
         this._events = this._events || {};
         this._events[event] = this._events[event] || [];
@@ -2722,6 +3471,10 @@ view.Control = class {
     error(error, fatal) {
         this._view.exception(error, fatal || false);
     }
+
+    escape(value) {
+        return value.toString().split('&').join('&amp;').split('<').join('&lt;').split('>').join('&gt;');
+    }
 };
 
 view.Expander = class extends view.Control {
@@ -2736,11 +3489,13 @@ view.Expander = class extends view.Control {
         return [this.element];
     }
 
-    enable() {
-        this._expander = this.createElement('div', 'sidebar-item-value-expander');
-        this._expander.innerText = '+';
-        this._expander.addEventListener('click', () => this.toggle());
-        this.add(this._expander);
+    expandable() {
+        if (!this._expander) {
+            this._expander = this.createElement('div', 'sidebar-item-value-expander');
+            this._expander.innerText = '+';
+            this._expander.addEventListener('click', () => this.toggle());
+            this.add(this._expander);
+        }
     }
 
     add(element) {
@@ -2816,7 +3571,7 @@ view.TargetSelector = class extends view.Control {
         const functions = [];
         if (model && Array.isArray(model.modules)) {
             for (const graph of model.modules) {
-                const name = graph.name || '(unnamed)';
+                const name = graph.name || '-';
                 modules.push({ name, target: graph, signature: null });
                 if (Array.isArray(graph.functions)) {
                     for (const func of graph.functions) {
@@ -2890,10 +3645,10 @@ view.ObjectSidebar = class extends view.Control {
     error(error, fatal) {
         super.error(error, fatal);
         const element = this.createElement('span');
-        const title = document.createElement('b');
+        const title = this.createElement('b');
         title.textContent = 'ERROR: ';
         element.appendChild(title);
-        const message = document.createTextNode(` ${error.message}`);
+        const message = this.createTextNode(` ${error.message}`);
         element.appendChild(message);
         this.element.appendChild(element);
     }
@@ -2971,6 +3726,14 @@ view.NodeSidebar = class extends view.ObjectSidebar {
             for (const output of outputs) {
                 const name = output.name;
                 this.addArgument(name, output);
+            }
+        }
+        const blocks = node.blocks;
+        if (Array.isArray(blocks) && blocks.length > 0) {
+            this.addSection('Blocks');
+            for (const block of blocks) {
+                const name = block.name;
+                this.addArgument(name, block);
             }
         }
         const metadata = this._view.model.attachment.metadata.node(node);
@@ -3181,19 +3944,21 @@ view.PrimitiveView = class extends view.Expander {
             const type = argument.type === 'attribute' ? null : argument.type;
             const value = argument.value;
             if (type) {
-                this.enable();
+                this.expandable();
             }
             switch (type) {
                 case 'graph': {
                     const line = this.createElement('div', 'sidebar-item-value-line-link');
-                    line.textContent = value.name || '\u00A0';
-                    line.addEventListener('click', () => this.emit('activate', value));
+                    line.textContent = value ? value.name || '\u00A0' : '(null)';
+                    if (value) {
+                        line.addEventListener('click', () => this.emit('activate', value));
+                    }
                     this.add(line);
                     break;
                 }
                 case 'function': {
                     const line = this.createElement('div', 'sidebar-item-value-line-link');
-                    line.textContent = value.type.name;
+                    line.textContent = value.name;
                     line.addEventListener('click', () => this.emit('activate', value));
                     this.add(line);
                     break;
@@ -3209,18 +3974,22 @@ view.PrimitiveView = class extends view.Expander {
                 default: {
                     const formatter = new view.Formatter(value, type);
                     let content = formatter.toString();
-                    if (content && content.length > 1000) {
-                        content = `${content.substring(0, 1000)}\u2026`;
+                    if (content) {
+                        if (content.length > 2000) {
+                            content = `${content.substring(0, 2000)}\u2026`;
+                        }
+                        const multiline = content.includes('\n');
+                        if (!multiline && content.length > 80) {
+                            this.expandable();
+                        }
+                        content = this.escape(content);
+                        if (multiline) {
+                            content = content.split('\n').join('<br>');
+                        }
                     }
-                    if (content && typeof content === 'string') {
-                        content = content.split('<').join('&lt;').split('>').join('&gt;');
-                    }
-                    if (content.indexOf('\n') >= 0) {
-                        content = content.split('\n').join('<br>');
-                    }
-                    const line = this.createElement('div', 'sidebar-item-value-line');
-                    line.innerHTML = content ? content : '&nbsp;';
-                    this.add(line);
+                    this._line = this.createElement('div', 'sidebar-item-value-line');
+                    this._line.innerHTML = content ? content : '&nbsp;';
+                    this.add(this._line);
                 }
             }
         } catch (error) {
@@ -3231,12 +4000,18 @@ view.PrimitiveView = class extends view.Expander {
 
     expand() {
         try {
+            if (this._line) {
+                this._line.classList.add('sidebar-item-value-line-wrap');
+            }
             const type = this._argument.type;
             const value = this._argument.value;
-            const content = type === 'tensor' && value && value.type ? value.type.toString() : this._argument.type;
-            const line = this.createElement('div', 'sidebar-item-value-line-border');
-            line.innerHTML = `type: <code><b>${content}</b></code>`;
-            this.add(line);
+            let content = type === 'tensor' && value && value.type ? value.type.toString() : this._argument.type;
+            if (content) {
+                content = this.escape(content);
+                const line = this.createElement('div', 'sidebar-item-value-line-border');
+                line.innerHTML = `type: <code><b>${content}</b></code>`;
+                this.add(line);
+            }
             const description = this._argument.description;
             if (description) {
                 const line = this.createElement('div', 'sidebar-item-value-line-border');
@@ -3249,9 +4024,15 @@ view.PrimitiveView = class extends view.Expander {
         }
     }
 
+    collapse() {
+        if (this._line) {
+            this._line.classList.remove('sidebar-item-value-line-wrap');
+        }
+    }
+
     _info(name, value) {
         const line = this.createElement('div');
-        line.innerHTML = `<b>${name}:</b> ${value}`;
+        line.innerHTML = `<b>${name}:</b> ${this.escape(value)}`;
         this._add(line);
     }
 
@@ -3279,7 +4060,7 @@ view.ValueView = class extends view.Expander {
                 this.element.classList.add('sidebar-item-value-content');
             }
             if (type || initializer || quantization || location || source === 'attribute') {
-                this.enable();
+                this.expandable();
             }
             if (initializer && source !== 'attribute') {
                 const element = this.createElement('div', 'sidebar-item-value-button');
@@ -3315,8 +4096,7 @@ view.ValueView = class extends view.Expander {
             } else if (this._hasCategory) {
                 this._bold('category', initializer.category);
             } else if (type) {
-                const value = type.toString().split('<').join('&lt;').split('>').join('&gt;');
-                this._code('tensor', value);
+                this._code('tensor', type);
             }
         } catch (error) {
             super.error(error, false);
@@ -3341,7 +4121,7 @@ view.ValueView = class extends view.Expander {
                 denotation = this._value.type.denotation || null;
             }
             if (type && (this._hasId || this._hasCategory)) {
-                this._code('tensor', type.split('<').join('&lt;').split('>').join('&gt;'));
+                this._code('tensor', type);
             }
             if (denotation) {
                 this._code('denotation', denotation);
@@ -3400,19 +4180,19 @@ view.ValueView = class extends view.Expander {
 
     _bold(name, value) {
         const line = this.createElement('div');
-        line.innerHTML = `${name}: <b>${value}</b>`;
+        line.innerHTML = `${name}: <b>${this.escape(value)}</b>`;
         this._add(line);
     }
 
     _code(name, value) {
         const line = this.createElement('div');
-        line.innerHTML = `${name}: <code><b>${value}</b></code>`;
+        line.innerHTML = `${name}: <code><b>${this.escape(value)}</b></code>`;
         this._add(line);
     }
 
     _info(name, value) {
         const line = this.createElement('div');
-        line.innerHTML = `<b>${name}:</b> ${value}`;
+        line.innerHTML = `<b>${name}:</b> ${this.escape(value)}`;
         this._add(line);
     }
 
@@ -3433,7 +4213,7 @@ view.TensorView = class extends view.Expander {
 
     render() {
         if (!this._button) {
-            this.enable();
+            this.expandable();
             this._button = this.createElement('div', 'sidebar-item-value-button');
             this._button.setAttribute('style', 'float: left;');
             this._button.innerHTML = `<svg class='sidebar-find-content-icon'><use href="#sidebar-icon-weight"></use></svg>`;
@@ -3499,15 +4279,16 @@ view.TensorView = class extends view.Expander {
     error(error, fatal) {
         super.error(error, fatal);
         const element = this.createElement('div', 'sidebar-item-value-line');
-        const title = document.createElement('b');
+        const title = this.createElement('b');
         title.textContent = 'ERROR: ';
         element.appendChild(title);
-        const message = document.createTextNode(error.message);
+        const message = this.createTextNode(error.message);
         element.appendChild(message);
         this.element.appendChild(element);
     }
 
     async export() {
+        const window = this._host.window;
         const tensor = this._tensor;
         const defaultPath = tensor.name ? tensor.name.split('/').join('_').split(':').join('_').split('.').join('_') : 'tensor';
         const file = await this._host.save('NumPy Array', 'npy', defaultPath);
@@ -3517,11 +4298,20 @@ view.TensorView = class extends view.Expander {
                 switch (tensor.type.dataType) {
                     case 'boolean': data_type = 'bool'; break;
                     case 'bfloat16': data_type = 'float32'; break;
-                    case 'float8e5m2': data_type = 'float16'; break;
-                    case 'float8e5m2fnuz': data_type = 'float16'; break;
+                    case 'float4e2m1fn': data_type = 'float16'; break;
+                    case 'float6e2m3fn': data_type = 'float16'; break;
+                    case 'float6e3m2fn': data_type = 'float16'; break;
+                    case 'float8e3m4': data_type = 'float16'; break;
+                    case 'float8e4m3': data_type = 'float16'; break;
+                    case 'float8e4m3b11fnuz': data_type = 'float16'; break;
                     case 'float8e4m3fn': data_type = 'float16'; break;
                     case 'float8e4m3fnuz': data_type = 'float16'; break;
+                    case 'float8e5m2': data_type = 'float16'; break;
+                    case 'float8e5m2fnuz': data_type = 'float16'; break;
+                    case 'float8e8m0fnu': data_type = 'float16'; break;
+                    case 'float8e8m0': data_type = 'float16'; break;
                     case 'int4': data_type = 'int8'; break;
+                    case 'int48': data_type = 'int64'; break;
                     default: data_type = tensor.type.dataType; break;
                 }
                 const python = await import('./python.js');
@@ -3533,10 +4323,10 @@ view.TensorView = class extends view.Expander {
                 const array = numpy.asarray(tensor.value, dtype);
                 numpy.save(bytes, array);
                 bytes.seek(0);
-                const blob = new Blob([bytes.read()], { type: 'application/octet-stream' });
+                const blob = new window.Blob([bytes.read()], { type: 'application/octet-stream' });
                 await this._host.export(file, blob);
             } catch (error) {
-                this.error(error, 'Error saving NumPy tensor.', null);
+                this._view.error(error, 'Error saving NumPy tensor.', null);
             }
         }
     }
@@ -3550,7 +4340,7 @@ view.NodeView = class extends view.Expander {
         const name = node.name;
         const type = node.type ? node.type.name : '';
         if (name && type) {
-            this.enable();
+            this.expandable();
         }
         if (type) {
             const type = node.type.name;
@@ -3742,6 +4532,13 @@ view.TensorSidebar = class extends view.ObjectSidebar {
             }
             const value = new view.TensorView(this._view, tensor, this._tensor);
             this.addEntry('value', value);
+            const attributes = tensor.attributes;
+            if (Array.isArray(attributes) && attributes.length > 0) {
+                this.addSection('Attributes');
+                for (const attribute of attributes) {
+                    this.addArgument(attribute.name, attribute, 'attribute');
+                }
+            }
             const metadata = this._view.model.attachment.metadata.tensor(tensor);
             if (Array.isArray(metadata) && metadata.length > 0) {
                 this.addSection('Metadata');
@@ -3931,6 +4728,9 @@ view.DocumentationSidebar = class extends view.Control {
     constructor(context, type) {
         super(context);
         this._type = type;
+        this._escapeReplacementsMap = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+        this._escapeTestNoEncodeRegExp = /[<>"']|&(?!#?\w+;)/;
+        this._escapeReplaceNoEncodeRegExp = /[<>"']|&(?!#?\w+;)/g;
     }
 
     get identifier() {
@@ -3952,7 +4752,7 @@ view.DocumentationSidebar = class extends view.Control {
                 this._append(this.element, 'h2', 'Attributes');
                 const attributes = this._append(this.element, 'dl');
                 for (const attribute of type.attributes) {
-                    this._append(attributes, 'dt', attribute.name + (attribute.type ? `: <tt>${attribute.type}</tt>` : ''));
+                    this._append(attributes, 'dt', attribute.name + (attribute.type ? `: <tt>${this._escape(attribute.type)}</tt>` : ''));
                     this._append(attributes, 'dd', attribute.description);
                 }
                 this.element.appendChild(attributes);
@@ -3961,7 +4761,7 @@ view.DocumentationSidebar = class extends view.Control {
                 this._append(this.element, 'h2', `Inputs${type.inputs_range ? ` (${type.inputs_range})` : ''}`);
                 const inputs = this._append(this.element, 'dl');
                 for (const input of type.inputs) {
-                    this._append(inputs, 'dt', input.name + (input.type ? `: <tt>${input.type}</tt>` : '') + (input.option ? ` (${input.option})` : ''));
+                    this._append(inputs, 'dt', input.name + (input.type ? `: <tt>${this._escape(input.type)}</tt>` : '') + (input.option ? ` (${input.option})` : ''));
                     this._append(inputs, 'dd', input.description);
                 }
             }
@@ -3969,7 +4769,7 @@ view.DocumentationSidebar = class extends view.Control {
                 this._append(this.element, 'h2', `Outputs${type.outputs_range ? ` (${type.outputs_range})` : ''}`);
                 const outputs = this._append(this.element, 'dl');
                 for (const output of type.outputs) {
-                    this._append(outputs, 'dt', output.name + (output.type ? `: <tt>${output.type}</tt>` : '') + (output.option ? ` (${output.option})` : ''));
+                    this._append(outputs, 'dt', output.name + (output.type ? `: <tt>${this._escape(output.type)}</tt>` : '') + (output.option ? ` (${output.option})` : ''));
                     this._append(outputs, 'dd', output.description);
                 }
             }
@@ -4018,13 +4818,20 @@ view.DocumentationSidebar = class extends view.Control {
         return element;
     }
 
+    _escape(content) {
+        if (this._escapeTestNoEncodeRegExp.test(content)) {
+            return content.replace(this._escapeReplaceNoEncodeRegExp, (ch) => this._escapeReplacementsMap[ch]);
+        }
+        return content;
+    }
+
     error(error, fatal) {
         super.error(error, fatal);
         const element = this.createElement('span');
-        const title = document.createElement('b');
+        const title = this.createElement('b');
         title.textContent = 'ERROR: ';
         element.appendChild(title);
-        const message = document.createTextNode(error.message);
+        const message = this.createTextNode(error.message);
         element.appendChild(message);
         this.element.appendChild(element);
     }
@@ -4242,7 +5049,7 @@ view.FindSidebar = class extends view.Control {
                 this._node(node);
             }
             if (this._state.connection) {
-                const outputs = this._signature ? this._signature.outputs : this._target.inputs;
+                const outputs = this._signature ? this._signature.outputs : this._target.outputs;
                 for (const output of outputs) {
                     if (!output.type || output.type.endsWith('*')) {
                         for (const value of output.value) {
@@ -4341,10 +5148,10 @@ view.FindSidebar = class extends view.Control {
     error(error, fatal) {
         super.error(error, fatal);
         const element = this.createElement('li');
-        const title = document.createElement('b');
+        const title = this.createElement('b');
         title.textContent = 'ERROR: ';
         element.appendChild(title);
-        const message = document.createTextNode(` ${error.message}`);
+        const message = this.createTextNode(` ${error.message}`);
         element.appendChild(message);
         this._content.appendChild(element);
     }
@@ -4432,7 +5239,7 @@ view.Documentation = class {
                     const target = {};
                     target.name = source.name;
                     if (source.type !== undefined) {
-                        target.type = source.type;
+                        target.type = source.type === null || typeof source.type === 'string' ? source.type : source.type.toString();
                     }
                     if (source.option !== undefined) {
                         target.option = source.option;
@@ -4469,7 +5276,7 @@ view.Documentation = class {
                     const target = {};
                     target.name = source.name;
                     if (source.type !== undefined) {
-                        target.type = source.type;
+                        target.type = source.type === null || typeof source.type === 'string' ? source.type : source.type.toString();
                     }
                     if (source.description) {
                         target.description = generator.html(source.description);
@@ -4512,7 +5319,7 @@ view.Documentation = class {
                     const target = {};
                     target.name = source.name;
                     if (source.type) {
-                        target.type = source.type;
+                        target.type = source.type === null || typeof source.type === 'string' ? source.type : source.type.toString();
                     }
                     if (source.description) {
                         target.description = generator.html(source.description);
@@ -4642,8 +5449,9 @@ view.Formatter = class {
                 return view.Formatter.tensor(value);
             }
             case 'object':
-            case 'function':
                 return value.type.name;
+            case 'function':
+                return value.name;
             case 'object[]':
             case 'function[]':
                 return value ? value.map((item) => item.type.name).join(', ') : '(null)';
@@ -4651,6 +5459,8 @@ view.Formatter = class {
                 return value ? value.toString() : '(null)';
             case 'type[]':
                 return value ? value.map((item) => item.toString()).join(', ') : '(null)';
+            case 'complex':
+                return value ? value.toString() : '(null)';
             default:
                 break;
         }
@@ -4659,7 +5469,7 @@ view.Formatter = class {
                 return `"${value}"`;
             }
             if (value.trim().length === 0) {
-                return '&nbsp;';
+                return value;
             }
             return value;
         }
@@ -4668,8 +5478,8 @@ view.Formatter = class {
                 return quote ? '[]' : '';
             }
             let ellipsis = false;
-            if (value.length > 1000) {
-                value = value.slice(0, 1000);
+            if (value.length > 2000) {
+                value = value.slice(0, 2000);
                 ellipsis = true;
             }
             const itemType = (type && type.endsWith('[]')) ? type.substring(0, type.length - 2) : null;
@@ -5474,6 +6284,72 @@ markdown.Generator = class {
     }
 };
 
+png.Encoder = class {
+
+    constructor(window, width, height) {
+        this.width = width;
+        this.height = height;
+        const compressor = new window.CompressionStream('deflate');
+        this.writer = compressor.writable.getWriter();
+        this.response = new window.Response(compressor.readable).blob();
+    }
+
+    async write(data, rows) {
+        const bytesPerRow = this.width * 4;
+        const filtered = new Uint8Array(rows * (1 + bytesPerRow));
+        let offset = 0;
+        let dataOffset = 0;
+        for (let i = 0; i < rows; i++) {
+            filtered[offset++] = 0;
+            filtered.set(data.subarray(dataOffset, dataOffset + bytesPerRow), offset);
+            offset += bytesPerRow;
+            dataOffset += bytesPerRow;
+        }
+        await this.writer.write(filtered);
+    }
+
+    async toBuffer() {
+        await this.writer.close();
+        const blob = await this.response;
+        const arrayBuffer = await blob.arrayBuffer();
+        const compressed = new Uint8Array(arrayBuffer);
+        const crc32Table = new Uint32Array(256);
+        for (let i = 0; i < 256; i++) {
+            let c = i;
+            for (let j = 0; j < 8; j++) {
+                c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+            }
+            crc32Table[i] = c;
+        }
+        const crc32 = (buffer, offset, length) => {
+            let crc = 0xFFFFFFFF;
+            for (let i = 0; i < length; i++) {
+                crc = crc32Table[(crc ^ buffer[offset + i]) & 0xFF] ^ (crc >>> 8);
+            }
+            return (crc ^ 0xFFFFFFFF) >>> 0;
+        };
+        const buffer = new Uint8Array(57 + compressed.length);
+        const view = new DataView(buffer.buffer);
+        // Signature
+        buffer.set([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], 0);
+        // IHDR
+        view.setUint32(8, 13, false);
+        buffer.set([0x49, 0x48, 0x44, 0x52], 12);
+        view.setUint32(16, this.width, false);
+        view.setUint32(20, this.height, false);
+        buffer.set([8, 6, 0, 0, 0], 24);
+        view.setUint32(29, crc32(buffer, 12, 17), false);
+        // IDAT
+        view.setUint32(33, compressed.length, false);
+        buffer.set([0x49, 0x44, 0x41, 0x54], 37);
+        buffer.set(compressed, 41);
+        view.setUint32(41 + compressed.length, crc32(buffer, 37, 4 + compressed.length), false);
+        // IEND
+        buffer.set([0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE, 0x42, 0x60, 0x82], 45 + compressed.length);
+        return buffer;
+    }
+};
+
 metadata.Attachment = class {
 
     constructor() {
@@ -5573,7 +6449,7 @@ metadata.Attachment.Container = class {
 
 metadata.Argument = class {
 
-    constructor(name, value, type) {
+    constructor(name, value, type = null) {
         this.name = name;
         this.value = value;
         this.type = type;
@@ -5641,11 +6517,11 @@ metrics.Target = class {
                 }
                 for (const tensor of initializers) {
                     const shape = tensor && tensor.type && tensor.type.shape && Array.isArray(tensor.type.shape.dimensions) ? tensor.type.shape.dimensions : [];
-                    if (!shape.every((dim) => typeof dim === 'number')) {
+                    if (!shape.every((dim) => typeof dim === 'number' || typeof dim === 'bigint')) {
                         parameters = 0;
                         break;
                     }
-                    parameters += shape.reduce((a, b) => a * b, 1);
+                    parameters += shape.reduce((a, b) => BigInt(a) * BigInt(b), 1n).toNumber();
                 }
                 if (parameters > 0) {
                     this._metrics.push(new metadata.Argument('parameters', parameters, 'attribute'));
@@ -5674,7 +6550,7 @@ metrics.Tensor = class {
             const keys = new Set(this._metrics.map((metrics) => metrics.name));
             const type = this._tensor.type;
             const shape = type.shape.dimensions;
-            const size = shape.reduce((a, b) => a * b, 1);
+            const size = shape.reduce((a, b) => BigInt(a) * BigInt(b), 1n).toNumber();
             if (size < 0x800000 &&
                 (type.dataType.startsWith('float') || type.dataType.startsWith('bfloat')) &&
                 (!keys.has('sparsity') || !keys.has('min') || !keys.has('max') && !keys.has('mean') || !keys.has('max') || !keys.has('std'))) {
@@ -5755,19 +6631,27 @@ view.Context = class {
     }
 
     get container() {
-        if (this._context instanceof view.EntryContext) {
+        if (this._context instanceof view.Container) {
             return this._context;
         }
         return null;
     }
 
-    async request(file) {
-        return this._context.request(file, 'utf-8', null);
+    async asset(file) {
+        return this._context.asset(file);
     }
 
     async fetch(file) {
-        const stream = await this._context.request(file, null, this._base);
+        const stream = await this._context.fetch(file, null, this._base);
         return new view.Context(this._context, file, stream);
+    }
+
+    context(identifier, stream, entries) {
+        if (stream instanceof Uint8Array) {
+            stream = new base.BinaryStream(stream);
+        }
+        const context = entries instanceof Map ? new view.Container(this._context, entries) : this._context;
+        return new view.Context(context, identifier, stream);
     }
 
     async require(id) {
@@ -6191,17 +7075,18 @@ view.Context = class {
     }
 };
 
-view.EntryContext = class {
+view.Container = class {
 
     constructor(host, entries) {
         this._host = host;
         this._entries = entries;
     }
 
-    async request(file, encoding, base) {
-        if (base === null) {
-            return this._host.request(file, encoding, base);
-        }
+    async asset(file) {
+        return this._host.asset(file);
+    }
+
+    async fetch(file, encoding, base) {
         let stream = null;
         if (typeof base === 'string') {
             stream = this._entries.get(`${base}/${file}`) || this._entries.get(`${base}\\${file}`);
@@ -6259,8 +7144,8 @@ view.ModelFactoryService = class {
         this.register('./tf', ['.pb', '.meta', '.pbtxt', '.prototxt', '.txt', '.pt', '.json', '.index', '.ckpt', '.graphdef', '.pbmm', /.data-[0-9][0-9][0-9][0-9][0-9]-of-[0-9][0-9][0-9][0-9][0-9]$/, /^events.out.tfevents./, /^.*group\d+-shard\d+of\d+(\.bin)?$/], ['.zip']);
         this.register('./tensorrt', ['.trt', '.trtmodel', '.engine', '.model', '.txt', '.uff', '.pb', '.tmfile', '.onnx', '.pth', '.dnn', '.plan', '.pt', '.dat', '.bin'], [], [/^ptrt/, /^ftrt/]);
         this.register('./keras', ['.h5', '.hd5', '.hdf5', '.keras', '.json', '.cfg', '.model', '.pb', '.pth', '.weights', '.pkl', '.lite', '.tflite', '.ckpt', '.pb', 'model.weights.npz', /^.*group\d+-shard\d+of\d+(\.bin)?$/], ['.zip'], [/^\x89HDF\r\n\x1A\n/]);
-        this.register('./safetensors', ['.safetensors', '.safetensors.index.json']);
-        this.register('./numpy', ['.npz', '.npy', '.pkl', '.pickle', '.model', '.model2', '.mge', '.joblib', '']);
+        this.register('./safetensors', ['.safetensors', '.safetensors.index.json', 'safetensors-index.json']);
+        this.register('./numpy', ['.npz', '.npy', '.pkl', '.pickle', '.model', '.model2', '.mge', '.joblib'], [], [/^\x93NUMPY/, /^PK\x03\x04/]);
         this.register('./lasagne', ['.pkl', '.pickle', '.joblib', '.model', '.pkl.z', '.joblib.z']);
         this.register('./lightgbm', ['.txt', '.pkl', '.model']);
         this.register('./sklearn', ['.pkl', '.pickle', '.joblib', '.model', '.meta', '.pb', '.pt', '.h5', '.pkl.z', '.joblib.z', '.pickle.dat', '.bin']);
@@ -6305,11 +7190,14 @@ view.ModelFactoryService = class {
         this.register('./hailo', ['.hn', '.har', '.metadata.json']);
         this.register('./tvm', ['.json', '.params']);
         this.register('./dot', ['.dot'], [], [/^\s*(\/\*[\s\S]*?\*\/|\/\/.*|#.*)?\s*digraph\s*([A-Za-z][A-Za-z0-9-_]*|".*?")?\s*{/m]);
-        this.register('./catboost', ['.cbm']);
+        this.register('./jax', ['.jax', '.jax_export', '.jax_exported']);
+        this.register('./catboost', ['.cbm', '.pkl'], [], [/^CBM1/]);
         this.register('./weka', ['.model']);
         this.register('./qnn', ['.json', '.bin', '.serialized', '.dlc']);
+        this.register('./espdl', ['.espdl'], [], [/^EDL2/]);
         this.register('./kann', ['.kann', '.bin', '.kgraph'], [], [/^....KaNN/]);
-        this.register('./xgboost', ['.xgb', '.xgboost', '.json', '.model', '.bin', '.txt'], [], [/^{L\x00\x00/, /^binf/, /^bs64/, /^\s*booster\[0\]:/]);
+        this.register('./xgboost', ['.xgb', '.xgboost', '.json', '.model', '.bin', '.txt', '.ubj'], [], [/^{L\x00\x00/, /^binf/, /^bs64/, /^\s*booster\[0\]:/]);
+        this.register('./tosa', ['.tosa', '.json'], [], [/^....TOSA/]);
         this.register('./transformers', ['.json']);
         this.register('', ['.cambricon', '.vnnmodel', '.nnc']);
         /* eslint-enable no-control-regex */
@@ -6332,7 +7220,7 @@ view.ModelFactoryService = class {
         try {
             await this._openSignature(context);
             const content = new view.Context(context);
-            const model = await this._openContext(content);
+            let model = await this._openContext(content);
             if (!model) {
                 const check = (obj) => {
                     if (obj instanceof Error) {
@@ -6353,11 +7241,20 @@ view.ModelFactoryService = class {
                 if (!check(entries)) {
                     await this._unsupported(content);
                 }
-                const entryContext = await this._openEntries(entries);
-                if (!entryContext) {
+                const container = await this._openEntries(entries);
+                if (!container) {
                     await this._unsupported(content);
                 }
-                return this._openContext(entryContext);
+                model = await this._openContext(container);
+            }
+            if (!model.format || typeof model.format !== 'string' || model.format.length === 0) {
+                throw new view.Error('Invalid model format name.');
+            }
+            if (!/^[a-zA-Z][a-zA-Z0-9-.]*( [a-zA-Z][a-zA-Z0-9-.]*)*( v\d+(\.\d+)*(b\d+)?([.+-][a-zA-Z0-9]+)?)?$/.test(model.format) || model.format.includes('undefined')) {
+                throw new view.Error(`Invalid model format name '${model.format}'.`);
+            }
+            if (model.producer && /[^\x20-\x7E\u00C0-\u00FF\u0370-\u03FF]/.test(model.producer)) {
+                throw new view.Error(`Invalid model producer name '${model.producer}'.`);
             }
             return model;
         } catch (error) {
@@ -6408,14 +7305,16 @@ view.ModelFactoryService = class {
             }
         }
         const regex = async() => {
-            const entries = [
-                { name: 'Unity metadata', value: /fileFormatVersion:/ },
-            ];
-            const buffer = stream.peek(Math.min(4096, stream.length));
-            const content = String.fromCharCode.apply(null, buffer);
-            for (const entry of entries) {
-                if (content.match(entry.value) && (!entry.identifier || context.identifier.match(entry.identifier))) {
-                    throw new view.Error(`Invalid file content. File contains ${entry.name}.`);
+            if (stream) {
+                const entries = [
+                    { name: 'Unity metadata', value: /fileFormatVersion:/ },
+                ];
+                const buffer = stream.peek(Math.min(4096, stream.length));
+                const content = String.fromCharCode.apply(null, buffer);
+                for (const entry of entries) {
+                    if (content.match(entry.value) && (!entry.identifier || context.identifier.match(entry.identifier))) {
+                        throw new view.Error(`Invalid file content. File contains ${entry.name}.`);
+                    }
                 }
             }
         };
@@ -6451,6 +7350,7 @@ view.ModelFactoryService = class {
                     { name: 'Trace Event data', tags: ['traceEvents'] },
                     { name: 'Trace Event data', tags: ['[].pid', '[].ph'] },
                     { name: 'Diffusers configuration', tags: ['_class_name', '_diffusers_version'] },
+                    { name: 'ModelScope configuration', tags: ['framework', 'task'] }, // https://github.com/modelscope/modelscope
                     { name: 'Tokenizer data', tags: ['<eos>', '<bos>'] },
                     { name: 'Jupyter Notebook data', tags: ['cells', 'nbformat'] },
                     { name: 'Kaggle credentials', tags: ['username','key'] },
@@ -6462,6 +7362,13 @@ view.ModelFactoryService = class {
                     { name: 'Keras configuration data', tags: ['floatx', 'epsilon', 'backend'] },
                     { name: 'PIMCOMP-NN model data', tags: ['node_list', 'reshape_info'] },
                     { name: 'AIMET encodings', tags: ['activation_encodings'] },
+                    { name: 'COCO annotations', tags: ['images', 'annotations', 'categories'] }, // https://cocodataset.org/
+                    { name: 'Sentence Transformers modules', tags: ['[].idx', '[].path', '[].type'] }, // https://www.sbert.net/
+                    { name: 'Sentence Transformers configuration', tags: ['__version__.sentence_transformers'] }, // https://www.sbert.net/
+                    { name: 'Lottie animation', tags: ['v', 'fr', 'ip', 'op', 'w', 'h', 'layers'] }, // https://lottiefiles.github.io/lottie-docs/
+                    { name: 'OCI image manifest', tags: ['schemaVersion', 'mediaType'] }, // https://github.com/opencontainers/image-spec
+                    { name: 'LabelMe annotation', tags: ['version', 'flags', 'shapes'] }, // https://github.com/labelmeai/labelme
+                    { name: 'Ollama model manifest', tags: ['model_format', 'model_family'] }, // https://github.com/ollama/ollama
                 ];
                 const match = (obj, tag) => {
                     if (tag.startsWith('[].')) {
@@ -6611,7 +7518,8 @@ view.ModelFactoryService = class {
                         { name: 'NVDA model data', identifier: 'NVDA' },
                         { name: 'BSTM model data', identifier: 'BSTM' },
                         { name: 'onnu model data', identifier: 'onnu' },
-                        { name: 'ONNX Runtime On-Device Training Checkpoint', identifier: 'ODTC' }
+                        { name: 'ONNX Runtime On-Device Training Checkpoint', identifier: 'ODTC' },
+                        { name: 'TOSA model data', identifier: 'TOSA' }
                     ];
                     for (const format of formats) {
                         if (identifier === format.identifier) {
@@ -6689,18 +7597,17 @@ view.ModelFactoryService = class {
         const modules = this._filter(context).filter((module) => module && module.length > 0);
         const errors = [];
         for (const module of modules) {
-            /* eslint-disable no-await-in-loop */
+            // eslint-disable-next-line no-await-in-loop
             const factory = await this._require(module);
+            // eslint-disable-next-line no-await-in-loop
             const type = await factory.match(context);
-            /* eslint-enable no-await-in-loop */
             if (context.stream && context.stream.position !== 0) {
                 throw new view.Error('Invalid stream position.');
             }
             if (type) {
                 try {
-                    /* eslint-disable no-await-in-loop */
+                    // eslint-disable-next-line no-await-in-loop
                     const model = await factory.open(context);
-                    /* eslint-enable no-await-in-loop */
                     if (!model.identifier) {
                         model.identifier = context.identifier;
                     }
@@ -6745,17 +7652,17 @@ view.ModelFactoryService = class {
                 entries = new Map(Array.from(entries)
                     .filter(([path]) => path.startsWith(folder))
                     .map(([path, stream]) => [path.substring(folder.length), stream]));
-                const entryContext = new view.EntryContext(this._host, entries);
+                const container = new view.Container(this._host, entries);
                 let matches = [];
                 for (const [name, stream] of queue) {
                     const identifier = name.substring(folder.length);
-                    const context = new view.Context(entryContext, identifier, stream);
+                    const context = new view.Context(container, identifier, stream);
                     const modules = this._filter(context);
                     for (const module of modules) {
-                        /* eslint-disable no-await-in-loop */
+                        // eslint-disable-next-line no-await-in-loop
                         const factory = await this._require(module);
+                        // eslint-disable-next-line no-await-in-loop
                         const type = await factory.match(context);
-                        /* eslint-enable no-await-in-loop */
                         if (context.stream && context.stream.position !== 0) {
                             throw new view.Error('Invalid stream position.');
                         }
@@ -6860,7 +7767,6 @@ view.ModelFactoryService = class {
                 { name: 'CviModel data', value: /^CviModel/ }, // https://github.com/sophgo/tpu-mlir/blob/master/include/tpu_mlir/Builder/CV18xx/proto/cvimodel.fbs
                 { name: 'DRTcrypt data', value: /^DRTcrypt/ },
                 { name: 'ELF executable', value: /^\x7FELF/ },
-                { name: 'EDL2 data', value: /^EDL2/ },
                 { name: 'encrypted data', value: /^ENCRYPTED_FILE|EV_ENCRYPTED/ },
                 { name: 'encrypted data', value: /^Salted__/ },
                 { name: 'encrypted data', value: /^KINGSOFTOFFICE/ },
@@ -6873,6 +7779,7 @@ view.ModelFactoryService = class {
                 { name: 'Keras Tokenizer data', value: /^"{\\"class_name\\":\s*\\"Tokenizer\\"/ },
                 { name: 'llama2.c checkpoint', value: /^..\x00\x00..\x00\x00..\x00\x00..\x00\x00..\x00\x00..\x00\x00..\x00\x00/, identifier: /^stories\d+[KM]\.bin/ },
                 { name: 'Mathematica Notebook data', value: /^\(\*\sContent-type:\sapplication\/vnd\.wolfram\.mathematica\s\*\)/ },
+                { name: 'Momentum Human Rig model', value: /^Momentum Model Definition/ }, // https://github.com/facebookresearch/MHR
                 { name: 'obfuscated data', value: /^obfs/ },
                 { name: 'Optimium model', value: /^EZMODEL/ }, // https://github.com/EZ-Optimium/Optimium,
                 { name: 'PNG image', value: /^\x89PNG/ },
@@ -6909,24 +7816,12 @@ view.ModelFactoryService = class {
 
     async import() {
         if (this._host.type === 'Browser' || this._host.type === 'Python') {
-            const files = [
-                './message', './onnx', './pytorch', './tflite', './mlnet',
-                './onnx-proto', './onnx-schema', './tflite-schema',
-                'onnx-metadata.json', 'pytorch-metadata.json', 'tflite-metadata.json'
-            ];
-            for (const file of files) {
-                /* eslint-disable no-await-in-loop */
-                try {
-                    if (file.startsWith('./')) {
-                        await this._host.require(file);
-                    } else if (file.endsWith('.json')) {
-                        await this._host.request(file, 'utf-8', null);
-                    }
-                } catch {
-                    // continue regardless of error
-                }
-                /* eslint-enable no-await-in-loop */
-            }
+            const modules = ['./message', './onnx', './pytorch', './tflite', './mlnet', './onnx-proto', './onnx-schema', './tflite-schema'];
+            const assets = ['onnx-metadata.json', 'pytorch-metadata.json', 'tflite-metadata.json'];
+            await Promise.all([
+                ...modules.map((module) => this._host.require(module).catch(() => {})),
+                ...assets.map((asset) => this._host.asset(asset).catch(() => {})),
+            ]);
         }
     }
 };
@@ -6939,7 +7834,7 @@ view.Metadata = class {
         if (!metadata.has(name)) {
             let data = null;
             try {
-                data = await context.request(name);
+                data = await context.asset(name);
             } catch {
                 // continue regardless of error
             }

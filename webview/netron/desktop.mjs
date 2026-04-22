@@ -32,10 +32,14 @@ desktop.Host = class {
         };
         this._window.addEventListener('unload', () => {
             if (typeof __coverage__ !== 'undefined') {
-                const file = path.join('.nyc_output', path.basename(window.location.pathname, '.html'));
-                /* eslint-disable no-undef */
-                fs.writeFileSync(`${file}.json`, JSON.stringify(__coverage__));
-                /* eslint-enable no-undef */
+                const dir = path.join(process.cwd(), 'dist', 'nyc', '.nyc_output');
+                if (!fs.existsSync(dir)) {
+                    fs.mkdirSync(dir, { recursive: true });
+                }
+                const base = path.basename(window.location.pathname, '.html');
+                const file = path.join(dir, `${base}.json`);
+                /* eslint-disable-next-line no-undef */
+                fs.writeFileSync(file, JSON.stringify(__coverage__));
             }
         });
         this._environment = electron.ipcRenderer.sendSync('get-environment', {});
@@ -52,21 +56,15 @@ desktop.Host = class {
         metadata.push(os.arch());
         let packager = '';
         if (process.platform === 'linux') {
-            if (process.env.APPIMAGE) {
-                packager = 'appimage';
-            } else if (process.env.SNAP) {
-                packager = 'snap';
-            } else {
+            try {
+                child_process.execFileSync('dpkg', ['-S', process.execPath]);
+                packager = 'deb';
+            } catch {
                 try {
-                    child_process.execFileSync('dpkg', ['-S', process.execPath]);
-                    packager = 'deb';
+                    child_process.execFileSync("rpm", ["-qf", process.execPath]);
+                    packager = 'rpm';
                 } catch {
-                    try {
-                        child_process.execFileSync("rpm", ["-qf", process.execPath]);
-                        packager = 'rpm';
-                    } catch {
-                        // continue regardless of error
-                    }
+                    // continue regardless of error
                 }
             }
         }
@@ -96,27 +94,14 @@ desktop.Host = class {
 
     async view(view) {
         this._view = view;
-        if (process.env.SNAP) {
-            this.document.body.classList.remove('spinner');
-            await this.message('Please migrate as Snap support is being discontinued.', null, 'Migrate');
-            this.openURL('https://github.com/lutzroeder/netron/issues/1500');
-            this.document.body.classList.add('spinner');
-        }
-        if (process.env.APPIMAGE) {
-            this.document.body.classList.remove('spinner');
-            await this.message('Please migrate as AppImage support is being discontinued.', null, 'Migrate');
-            this.openURL('https://github.com/lutzroeder/netron/issues/1500');
-            this.document.body.classList.add('spinner');
-        }
         const age = async () => {
             const days = (new Date() - new Date(this._environment.date)) / (24 * 60 * 60 * 1000);
             if (days > 180) {
                 this.document.body.classList.remove('spinner');
                 const link = this._element('logo-github').href;
                 for (;;) {
-                    /* eslint-disable no-await-in-loop */
+                    /* eslint-disable-next-line no-await-in-loop */
                     await this.message('Please update to the newest version.', null, 'Download');
-                    /* eslint-enable no-await-in-loop */
                     this.openURL(link);
                 }
             }
@@ -321,7 +306,8 @@ desktop.Host = class {
     }
 
     async export(file, blob) {
-        const reader = new FileReader();
+        const window = this.window;
+        const reader = new window.FileReader();
         reader.onload = (e) => {
             const data = new Uint8Array(e.target.result);
             fs.writeFile(file, data, null, async (error) => {
@@ -333,7 +319,7 @@ desktop.Host = class {
         let error = null;
         if (!blob) {
             error = new Error(`Export blob is '${JSON.stringify(blob)}'.`);
-        } else if (!(blob instanceof Blob)) {
+        } else if (blob instanceof window.Blob === false) {
             error = new Error(`Export blob type is '${typeof blob}'.`);
         }
         if (error) {
@@ -356,7 +342,11 @@ desktop.Host = class {
         });
     }
 
-    async request(file, encoding, basename) {
+    async asset(file) {
+        return this.fetch(file, 'utf-8', null);
+    }
+
+    async fetch(file, encoding, basename) {
         return new Promise((resolve, reject) => {
             const dirname = path.dirname(url.fileURLToPath(import.meta.url));
             const pathname = path.join(basename || dirname, file);
@@ -367,7 +357,7 @@ desktop.Host = class {
                     reject(err);
                 } else if (!stat.isFile()) {
                     reject(new Error(`The path '${file}' is not a file.`));
-                } else if (stat && stat.size < 0x7ffff000) {
+                } else if (stat && stat.size < 0x40000000) {
                     fs.readFile(pathname, encoding, (err, data) => {
                         if (err) {
                             reject(err);
@@ -448,7 +438,7 @@ desktop.Host = class {
         const stat = fs.statSync(location);
         if (stat.isFile()) {
             const dirname = path.dirname(location);
-            const stream = await this.request(basename, null, dirname);
+            const stream = await this.fetch(basename, null, dirname);
             return new desktop.Context(this, dirname, basename, stream);
         } else if (stat.isDirectory()) {
             const entries = new Map();
@@ -519,8 +509,9 @@ desktop.Host = class {
     }
 
     _request(location, headers, timeout) {
+        const window = this.window;
         return new Promise((resolve, reject) => {
-            const url = new URL(location);
+            const url = new window.URL(location);
             const protocol = url.protocol === 'https:' ? https : http;
             const options = {};
             options.headers = headers;
@@ -658,8 +649,12 @@ desktop.Context = class {
         return this._entries;
     }
 
-    async request(file, encoding, base) {
-        return this._host.request(file, encoding, base === undefined ? this._folder : base);
+    async asset(file) {
+        return this._host.asset(file);
+    }
+
+    async fetch(file, encoding, base) {
+        return this._host.fetch(file, encoding, base === undefined ? this._folder : base);
     }
 
     async require(id) {

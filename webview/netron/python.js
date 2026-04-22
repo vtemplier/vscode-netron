@@ -36,7 +36,10 @@ python.Execution = class {
                 this.set(key, value);
             }
             __getitem__(key) {
-                return this.get(key);
+                if (!super.has(key)) {
+                    throw new python.Error(`KeyError: ${key}`);
+                }
+                return super.get(key);
             }
             __delitem__(key) {
                 this.delete(key);
@@ -84,14 +87,12 @@ python.Execution = class {
                 if (args.length === 1) {
                     const [obj] = args;
                     if (obj === null) {
-                        /* eslint-disable no-constructor-return */
+                        // eslint-disable-next-line no-constructor-return
                         return builtins.NoneType;
-                        /* eslint-enable no-constructor-return */
                     }
                     if (obj && obj.__class__) {
-                        /* eslint-disable no-constructor-return */
+                        // eslint-disable-next-line no-constructor-return
                         return obj.__class__;
-                        /* eslint-enable no-constructor-return */
                     }
                     throw new python.Error(`Unknown type '${obj}'`);
                 }
@@ -102,9 +103,8 @@ python.Execution = class {
                     for (const [key, value] of body) {
                         cls[key] = value;
                     }
-                    /* eslint-disable no-constructor-return */
+                    // eslint-disable-next-line no-constructor-return
                     return cls;
-                    /* eslint-enable no-constructor-return */
                 }
                 throw new python.Error(`Invalid 'builtins.dict' argument count.`);
             }
@@ -144,7 +144,6 @@ python.Execution = class {
         this.register('jax._src.array');
         this.register('jax._src.device_array');
         const functools = this.register('functools');
-        this.registerType('functools.partial', class {});
         const keras = this.register('keras');
         const catboost = this.register('catboost');
         this.register('lightgbm');
@@ -169,6 +168,8 @@ python.Execution = class {
         this.register('sklearn.externals.joblib.numpy_pickle');
         const torch = this.register('torch');
         this.torch = torch;
+        const executorch = this.register('executorch');
+        this.executorch = executorch;
         const torchvision = this.register('torchvision');
         const torchao = this.register('torchao');
         const sympy = this.register('sympy');
@@ -181,9 +182,11 @@ python.Execution = class {
         this.register('torch.ops.torchaudio');
         this.register('torch.ops._caffe2');
         this.register('torchvision');
+        this.register('ultralytics').__materialize__ = (name) => this.registerType(name, class extends torch.nn.modules.module.Module {});
         this.register('__torch__');
         const sys = this.register('sys');
         sys.modules = this._modules;
+        this.register('ubjson');
         this.register('xgboost');
         this.registerType('ast.AST', class {});
         this.registerType('ast.mod', class extends ast.AST {});
@@ -1388,28 +1391,23 @@ python.Execution = class {
                     }
                     const literal = this._parseLiteral();
                     if (literal) {
-                        if (stack.length > 0 &&
-                            (literal.type === 'int' || literal.type === 'float' || literal.type === 'complex') &&
-                            (literal.value.startsWith('-') || literal.value.startsWith('+'))) {
-                            const op = literal.value < 0 ? new ast.Sub() : new ast.Add();
-                            const left = stack.pop();
-                            const right = new ast.Constant(Math.abs(literal.value));
-                            node = new ast.BinOp(left, op, right);
-                            stack.push(node);
-                        } else if (stack.length === 1 && literal.type === 'str' && stack[0] instanceof ast.Constant && typeof stack[0].value === 'string') {
+                        if (stack.length === 1 && literal.type === 'str' && stack[0] instanceof ast.Constant && typeof stack[0].value === 'string') {
                             stack[0].value += literal.value.substring(1, literal.value.length - 1);
                         } else {
                             let value = literal.value;
-                            if (literal.type === 'int' || literal.type === 'float' || literal.type === 'complex') {
-                                switch (value) {
-                                    case 'inf': value = Infinity; break;
-                                    case '-inf': value = -Infinity; break;
-                                    default: value = Number(value); break;
-                                }
-                            } else if (literal.type === 'str') {
-                                value = literal.value.substring(1, literal.value.length - 1);
-                            } else {
-                                throw new python.Error(`Invalid literal ${this._location()}`);
+                            switch (literal.type) {
+                                case 'int':
+                                case 'float':
+                                    value = value === 'inf' ? Infinity : Number(value);
+                                    break;
+                                case 'complex':
+                                    value = new builtins.complex(0, Number(value.slice(0, -1)));
+                                    break;
+                                case 'str':
+                                    value = value.substring(1, value.length - 1);
+                                    break;
+                                default:
+                                    throw new python.Error(`Invalid literal type '${literal.type}' ${this._location()}`);
                             }
                             const node = new ast.Constant(value, literal.type);
                             this._mark(node, position);
@@ -2063,8 +2061,7 @@ python.Execution = class {
                 const decimal = (c) => c >= '0' && c <= '9' || c === '_';
                 const hex = (c) => decimal(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F') || c === '_';
                 let c = this._get(this._position);
-                const sign = (c === '-' || c === '+') ? 1 : 0;
-                let i = this._position + sign;
+                let i = this._position;
                 c = this._get(i);
                 if (c === '0') {
                     let radix = 0;
@@ -2108,7 +2105,7 @@ python.Execution = class {
                         }
                     }
                 }
-                i = this._position + sign;
+                i = this._position;
                 let isDecimal = false;
                 if (this._get(i) >= '1' && this._get(i) <= '9') {
                     while (decimal(this._get(i))) {
@@ -2134,7 +2131,7 @@ python.Execution = class {
                         return { type: 'int', value: intText };
                     }
                 }
-                i = this._position + sign;
+                i = this._position;
                 if ((this._get(i) >= '0' && this._get(i) <= '9') ||
                     (this._get(i) === '.' && this._get(i + 1) >= '0' && this._get(i + 1) <= '9')) {
                     while (decimal(this._get(i))) {
@@ -2146,7 +2143,7 @@ python.Execution = class {
                     while (decimal(this._get(i))) {
                         i++;
                     }
-                    if (i > (this._position + sign)) {
+                    if (i > this._position) {
                         if (this._get(i) === 'e' || this._get(i) === 'E') {
                             i++;
                             if (this._get(i) === '-' || this._get(i) === '+') {
@@ -2165,7 +2162,7 @@ python.Execution = class {
                             }
                         }
                     }
-                    if (i > (this._position + sign)) {
+                    if (i > this._position) {
                         if (this._get(i) === 'j' || this._get(i) === 'J') {
                             return { type: 'complex', value: this._text.substring(this._position, i + 1) };
                         }
@@ -2348,6 +2345,12 @@ python.Execution = class {
                     this.push(...iterable);
                 }
             }
+            append(item) {
+                this.push(item);
+            }
+            extend(items) {
+                this.push(...items);
+            }
         });
         this.registerType('builtins.number', class {});
         this.registerFunction('builtins.__import__', (name, globals, locals, fromlist, level) => {
@@ -2409,6 +2412,9 @@ python.Execution = class {
             constructor(real, imaginary) {
                 this.real = real;
                 this.imag = imaginary;
+            }
+            toString() {
+                return `${this.real}${this.imag < 0 ? '' : '+'}${this.imag}j`;
             }
         });
         this.registerType('builtins.NoneType', class {});
@@ -2489,7 +2495,92 @@ python.Execution = class {
             }
         });
         this.registerType('catboost._catboost._CatBoost', class {
-            _deserialize_model(/* serialized_model_str */) {
+            _deserialize_model(serialized_model_str) {
+                const src = serialized_model_str;
+                const data = new Uint8Array(src.buffer.slice(src.byteOffset + 8, src.byteOffset + src.byteLength));
+                const reader = this.flatbuffers.BinaryReader.open(data);
+                this._core = this.schema.NCatBoostFbs.TModelCore.create(reader);
+            }
+            _get_format_version() {
+                return this._core.FormatVersion;
+            }
+            _get_info_map() {
+                const map = new Map();
+                if (this._core.InfoMap) {
+                    for (const entry of this._core.InfoMap) {
+                        if (entry.Key && entry.Value) {
+                            map.set(entry.Key, entry.Value);
+                        }
+                    }
+                }
+                return map;
+            }
+            _get_tree_count() {
+                const trees = this._core.ModelTrees;
+                return trees && trees.TreeSizes ? trees.TreeSizes.length : 0;
+            }
+            _get_feature_names() {
+                const trees = this._core.ModelTrees;
+                if (!trees) {
+                    return [];
+                }
+                const names = [];
+                for (const list of [trees.FloatFeatures, trees.CatFeatures, trees.TextFeatures, trees.EmbeddingFeatures]) {
+                    if (list) {
+                        for (const feature of list) {
+                            names.push(feature.FeatureId || `feature_${feature.FlatIndex}`);
+                        }
+                    }
+                }
+                return names;
+            }
+            _get_float_features() {
+                const trees = this._core.ModelTrees;
+                return trees && trees.FloatFeatures ? trees.FloatFeatures : [];
+            }
+            _get_cat_features() {
+                const trees = this._core.ModelTrees;
+                return trees && trees.CatFeatures ? trees.CatFeatures : [];
+            }
+            _get_text_features() {
+                const trees = this._core.ModelTrees;
+                return trees && trees.TextFeatures ? trees.TextFeatures : [];
+            }
+            _get_embedding_features() {
+                const trees = this._core.ModelTrees;
+                return trees && trees.EmbeddingFeatures ? trees.EmbeddingFeatures : [];
+            }
+            _get_leaf_values() {
+                const trees = this._core.ModelTrees;
+                return trees && trees.LeafValues ? trees.LeafValues : [];
+            }
+            _get_leaf_weights() {
+                const trees = this._core.ModelTrees;
+                return trees && trees.LeafWeights ? trees.LeafWeights : [];
+            }
+            _get_scale_and_bias() {
+                const trees = this._core.ModelTrees;
+                return trees ? [trees.Scale, trees.Bias] : [1, 0];
+            }
+            _get_tree_splits() {
+                const trees = this._core.ModelTrees;
+                return trees && trees.TreeSplits ? trees.TreeSplits : [];
+            }
+            _get_tree_sizes() {
+                const trees = this._core.ModelTrees;
+                return trees && trees.TreeSizes ? trees.TreeSizes : [];
+            }
+            _get_tree_start_offsets() {
+                const trees = this._core.ModelTrees;
+                return trees && trees.TreeStartOffsets ? trees.TreeStartOffsets : [];
+            }
+            _get_borders() {
+                const features = this._get_float_features();
+                const borders = [];
+                for (const feature of features) {
+                    borders.push(feature.Borders ? Array.from(feature.Borders) : []);
+                }
+                return borders;
             }
         });
         this.registerType('catboost.core._CatBoostBase', class {
@@ -2498,10 +2589,6 @@ python.Execution = class {
             }
             __setstate__(state) {
                 for (const [key, value] of state) {
-                    if (key === '__model') {
-                        this._load_from_string(value);
-                        continue;
-                    }
                     this[key] = value;
                 }
             }
@@ -2513,9 +2600,8 @@ python.Execution = class {
             }
         });
         this.registerType('catboost.core.CatBoost', class extends catboost.core._CatBoostBase {
-            load_model(/* blob */) {
-                throw new python.Error("'catboost.core.CatBoostClassifier.load_model' not implemented.");
-                // this._load_from_string(blob);
+            load_model(blob) {
+                this._load_from_string(blob || this.__model);
             }
         });
         this.registerType('catboost.core.CatBoostClassifier', class extends catboost.core.CatBoost {});
@@ -2523,6 +2609,9 @@ python.Execution = class {
         catboost.CatBoostClassifier = catboost.core.CatBoostClassifier;
         catboost.CatBoostRegressor = catboost.core.CatBoostRegressor;
         catboost.CatBoost = catboost.core.CatBoost;
+        this.registerType('autogluon.tabular.models.catboost.catboost_model.CatBoostModel', class {});
+        this.registerType('autogluon.core.metrics._PredictScorer', class {});
+        this.registerType('autogluon.common.features.feature_metadata.FeatureMetadata', class {});
         this.registerType('collections.deque', class extends Array {
             constructor(iterable) {
                 super();
@@ -2531,6 +2620,12 @@ python.Execution = class {
                         this.push(value);
                     }
                 }
+            }
+            append(item) {
+                this.push(item);
+            }
+            extend(items) {
+                this.push(...items);
             }
         });
         this.registerType('collections.OrderedDict', class extends dict {});
@@ -2748,8 +2843,8 @@ python.Execution = class {
                         }
                     case 'c':
                         switch (this.itemsize) {
-                            case 8: return 'complex64';
-                            case 16: return 'complex128';
+                            case 8: return 'complex<float32>';
+                            case 16: return 'complex<float64>';
                             default: throw new python.Error(`Unsupported complex itemsize '${this.itemsize}'.`);
                         }
                     case 'S':
@@ -2858,12 +2953,9 @@ python.Execution = class {
                     const [size] = unpickler.read(1);
                     unpickler.read(size);
                 }
-                if (this.order === 'F') {
-                    throw new python.Error('Fortran order not implemented.');
-                }
                 const size = this.dtype.itemsize * this.shape.reduce((a, b) => a * b, 1);
                 this.data = unpickler.read(size);
-                return execution.invoke(this.subclass, [this.shape, this.dtype, this.data]);
+                return new this.subclass(this.shape, this.dtype, this.data, undefined, undefined, this.order);
             }
         });
         this.registerType('joblib.numpy_pickle.NDArrayWrapper', class {
@@ -3238,9 +3330,16 @@ python.Execution = class {
                     const shape = this.shape;
                     const strides = new Array(shape.length);
                     let stride = this.itemsize;
-                    for (let i = shape.length - 1; i >= 0; i--) {
-                        strides[i] = stride;
-                        stride *= shape[i];
+                    if (this.order === 'F' || this.flags.fn) {
+                        for (let i = 0; i < shape.length; i++) {
+                            strides[i] = stride;
+                            stride *= shape[i];
+                        }
+                    } else {
+                        for (let i = shape.length - 1; i >= 0; i--) {
+                            strides[i] = stride;
+                            stride *= shape[i];
+                        }
                     }
                     return strides;
                 }
@@ -3385,6 +3484,7 @@ python.Execution = class {
         });
         this.registerType('pandas.core.arrays.interval.IntervalArray', class {});
         this.registerType('pandas.core.arrays.integer.IntegerArray', class extends pandas.core.arrays.numeric.NumericArray {});
+        this.registerType('pandas.core.arrays.integer.Int64Dtype', class {});
         this.registerType('pandas._libs.tslibs.dtypes.PeriodDtypeBase', class {});
         this.registerType('pandas.core.dtypes.dtypes.PeriodDtype', class extends pandas._libs.tslibs.dtypes.PeriodDtypeBase {});
         this.registerType('pandas.core.dtypes.dtypes.IntervalDtype', class {});
@@ -3576,6 +3676,7 @@ python.Execution = class {
         this.registerType('sklearn.ensemble._voting.VotingClassifier', class {});
         this.registerType('sklearn.ensemble._voting.VotingRegressor', class {});
         this.registerType('sklearn.ensemble._weight_boosting.AdaBoostClassifier', class {});
+        this.registerType('sklearn.covariance._robust_covariance.MinCovDet', class {});
         this.registerType('sklearn.ensemble._weight_boosting.AdaBoostRegressor', class {});
         this.registerType('sklearn.ensemble.forest.RandomForestClassifier', class {});
         this.registerType('sklearn.ensemble.forest.RandomForestRegressor', class {});
@@ -3616,13 +3717,16 @@ python.Execution = class {
         this.registerType('sklearn.gaussian_process.kernels.WhiteKernel', class {});
         this.registerType('sklearn.grid_search._CVScoreTuple', class {});
         this.registerType('sklearn.grid_search.GridSearchCV', class {});
+        this.registerType('sklearn.impute._base.MissingIndicator', class {});
         this.registerType('sklearn.impute._base.SimpleImputer', class {});
         this.registerType('sklearn.impute._iterative.IterativeImputer', class {});
         this.registerType('sklearn.impute._iterative._ImputerTriplet', class {});
+        this.registerType('sklearn.impute._knn.KNNImputer', class {});
         this.registerType('sklearn.impute.SimpleImputer', class {});
         this.registerType('sklearn.isotonic.IsotonicRegression', class {});
         this.registerType('sklearn.kernel_ridge.KernelRidge', class {});
         this.registerType('sklearn.linear_model._base.LinearRegression', class {});
+        this.registerType('sklearn.linear_model._bayes.ARDRegression', class {});
         this.registerType('sklearn.linear_model._bayes.BayesianRidge', class {});
         this.registerType('sklearn.linear_model._coordinate_descent.ElasticNetCV', class {});
         this.registerType('sklearn.linear_model._coordinate_descent.ElasticNet', class {});
@@ -3633,6 +3737,8 @@ python.Execution = class {
         this.registerType('sklearn.linear_model._perceptron.Perceptron', class {});
         this.registerType('sklearn.linear_model._quantile.QuantileRegressor', class {});
         this.registerType('sklearn.linear_model._ridge.Ridge', class {});
+        this.registerType('sklearn.linear_model._huber.HuberRegressor', class {});
+        this.registerType('sklearn.linear_model._ridge.RidgeCV', class {});
         this.registerType('sklearn.linear_model._ridge.RidgeClassifier', class {});
         this.registerType('sklearn.linear_model._ridge.RidgeClassifierCV', class {});
         this.registerType('sklearn.linear_model._sgd_fast.Hinge', class {});
@@ -3670,6 +3776,7 @@ python.Execution = class {
         this.registerType('sklearn.model_selection._search.GridSearchCV', class {});
         this.registerType('sklearn.model_selection._search.RandomizedSearchCV', class {});
         this.registerType('sklearn.model_selection._split.KFold', class {});
+        this.registerType('sklearn.model_selection._split.PredefinedSplit', class {});
         this.registerType('sklearn.model_selection._split.RepeatedKFold', class {});
         this.registerType('sklearn.model_selection._split.StratifiedKFold', class {});
         this.registerType('sklearn.model_selection._split.StratifiedShuffleSplit', class {});
@@ -3736,6 +3843,7 @@ python.Execution = class {
         this.registerType('sklearn.preprocessing._label.LabelEncoder', class {});
         this.registerType('sklearn.preprocessing._label.MultiLabelBinarizer', class {});
         this.registerType('sklearn.preprocessing._polynomial.PolynomialFeatures', class {});
+        this.registerType('sklearn.preprocessing._target_encoder.TargetEncoder', class {});
         this.registerType('sklearn.preprocessing.data.Binarizer', class {});
         this.registerType('sklearn.preprocessing.data.MaxAbsScaler', class {});
         this.registerType('sklearn.preprocessing.data.MinMaxScaler', class {});
@@ -3794,7 +3902,7 @@ python.Execution = class {
             load() {
                 const reader = this._reader;
                 const marker = [];
-                let stack = [];
+                let stack = new builtins.list();
                 const memo = {};
                 let size = 0;
                 while (reader.position < reader.length) {
@@ -3841,6 +3949,9 @@ python.Execution = class {
                         }
                         case 103: { // GET 'g'
                             const index = parseInt(reader.line(), 10);
+                            if (index in memo === false) {
+                                throw new python.Error(`Memo value not found at index '${index}'.`);
+                            }
                             stack.push(memo[index]);
                             break;
                         }
@@ -3886,9 +3997,14 @@ python.Execution = class {
                             stack.push(obj);
                             break;
                         }
-                        case 104: // BINGET 'h'
-                            stack.push(memo[reader.byte()]);
+                        case 104: { // BINGET 'h'
+                            const index = reader.byte();
+                            if (index in memo === false) {
+                                throw new python.Error(`Memo value not found at index '${index}'.`);
+                            }
+                            stack.push(memo[index]);
                             break;
+                        }
                         case 105: { // INST 'i'
                             const module = reader.line();
                             const name = reader.line();
@@ -3900,9 +4016,14 @@ python.Execution = class {
                             stack.push(obj);
                             break;
                         }
-                        case 106: // LONG_BINGET 'j'
-                            stack.push(memo[reader.uint32()]);
+                        case 106: { // LONG_BINGET 'j'
+                            const index = reader.uint32();
+                            if (index in memo === false) {
+                                throw new python.Error(`Memo value not found at index '${index}'.`);
+                            }
+                            stack.push(memo[index]);
                             break;
+                        }
                         case 113: // BINPUT 'q'
                             if (stack.length === 0) {
                                 throw new python.Error(`Empty stack during 'BINPUT' operation.`);
@@ -4049,14 +4170,21 @@ python.Execution = class {
                             break;
                         case 97: { // APPEND 'a'
                             const append = stack.pop();
-                            stack[stack.length - 1].push(append);
+                            const list = stack[stack.length - 1];
+                            list.append(append);
                             break;
                         }
                         case 101: { // APPENDS 'e'
                             const appends = stack;
                             stack = marker.pop();
-                            const list = stack[stack.length - 1];
-                            list.push(...appends);
+                            const list_obj = stack[stack.length - 1];
+                            if (list_obj.extend) {
+                                list_obj.extend(appends);
+                            } else {
+                                for (const item of appends) {
+                                    list_obj.append(item);
+                                }
+                            }
                             break;
                         }
                         case 83: { // STRING 'S'
@@ -4115,7 +4243,7 @@ python.Execution = class {
                         }
                         case 40: // MARK '('
                             marker.push(stack);
-                            stack = [];
+                            stack = new builtins.list();
                             break;
                         case 136: // NEWTRUE '\x88'
                             stack.push(true);
@@ -4131,7 +4259,7 @@ python.Execution = class {
                                 case 1: [number] = data; break;
                                 case 2: number = data[1] << 8 | data[0]; break;
                                 case 3: number = data[2] << 16 | data[1] << 8 | data[0]; break;
-                                case 4: number = data[3] << 24 | data[2] << 16 | data[1] << 8 | data[0]; break;
+                                case 4: number = (data[3] << 24 | data[2] << 16 | data[1] << 8 | data[0]) >>> 0; break;
                                 case 5: number = data[4] * 0x100000000 + ((data[3] << 24 | data[2] << 16 | data[1] << 8 | data[0]) >>> 0); break;
                                 default: number = Array.prototype.slice.call(data, 0); break;
                             }
@@ -4405,20 +4533,256 @@ python.Execution = class {
         types.FunctionType = builtins.function;
         types.TypeType = builtins.type;
         types.CodeType = builtins.code;
+        this.registerFunction('ubjson.loadb', (data) => {
+            const buffer = data instanceof Uint8Array ? new Uint8Array(data.buffer, data.byteOffset, data.byteLength) : new Uint8Array(data);
+            const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
+            const utf8 = new TextDecoder('utf-8');
+            let p = 0;
+            const integer = () => {
+                const m = buffer[p++];
+                switch (m) {
+                    case 0x69: return view.getInt8(p++);
+                    case 0x55: return view.getUint8(p++);
+                    case 0x49: {
+                        const v = view.getInt16(p);
+                        p += 2;
+                        return v;
+                    }
+                    case 0x6C: {
+                        const v = view.getInt32(p);
+                        p += 4;
+                        return v;
+                    }
+                    case 0x4C: {
+                        const v = view.getBigInt64(p);
+                        p += 8;
+                        return Number(v);
+                    }
+                    default: throw new python.Error(`UBJSON integer '0x${m.toString(16)}'.`);
+                }
+            };
+            const str = () => {
+                const n = integer();
+                const s = utf8.decode(buffer.subarray(p, p + n));
+                p += n;
+                return s;
+            };
+            const typed = (t, n) => {
+                const a = new Array(n);
+                switch (t) {
+                    case 0x69:
+                        for (let i = 0; i < n; i++) {
+                            a[i] = view.getInt8(p);
+                            p += 1;
+                        }
+                        return a;
+                    case 0x55:
+                        for (let i = 0; i < n; i++) {
+                            a[i] = view.getUint8(p);
+                            p += 1;
+                        }
+                        return a;
+                    case 0x49:
+                        for (let i = 0; i < n; i++) {
+                            a[i] = view.getInt16(p);
+                            p += 2;
+                        }
+                        return a;
+                    case 0x6C:
+                        for (let i = 0; i < n; i++) {
+                            a[i] = view.getInt32(p);
+                            p += 4;
+                        }
+                        return a;
+                    case 0x4C:
+                        for (let i = 0; i < n; i++) {
+                            a[i] = Number(view.getBigInt64(p));
+                            p += 8;
+                        }
+                        return a;
+                    case 0x64:
+                        for (let i = 0; i < n; i++) {
+                            a[i] = view.getFloat32(p);
+                            p += 4;
+                        }
+                        return a;
+                    case 0x44:
+                        for (let i = 0; i < n; i++) {
+                            a[i] = view.getFloat64(p);
+                            p += 8;
+                        }
+                        return a;
+                    case 0x54: return new Array(n).fill(true);
+                    case 0x46: return new Array(n).fill(false);
+                    case 0x5A: return new Array(n).fill(null);
+                    case 0x53:
+                        for (let i = 0; i < n; i++) {
+                            a[i] = str();
+                        }
+                        return a;
+                    default: throw new python.Error(`UBJSON typed array '0x${t.toString(16)}'.`);
+                }
+            };
+            const value = () => {
+                const m = buffer[p++];
+                switch (m) {
+                    case 0x5A: return null;
+                    case 0x54: return true;
+                    case 0x46: return false;
+                    case 0x69: return view.getInt8(p++);
+                    case 0x55: return view.getUint8(p++);
+                    case 0x49: {
+                        const v = view.getInt16(p);
+                        p += 2;
+                        return v;
+                    }
+                    case 0x6C: {
+                        const v = view.getInt32(p);
+                        p += 4;
+                        return v;
+                    }
+                    case 0x4C: {
+                        const v = view.getBigInt64(p);
+                        p += 8;
+                        return Number(v);
+                    }
+                    case 0x64: {
+                        const v = view.getFloat32(p);
+                        p += 4;
+                        return v;
+                    }
+                    case 0x44: {
+                        const v = view.getFloat64(p);
+                        p += 8;
+                        return v;
+                    }
+                    case 0x53: return str();
+                    case 0x7B: {
+                        const o = {};
+                        if (buffer[p] === 0x7D) {
+                            p++;
+                            return o;
+                        }
+                        let n = -1;
+                        if (buffer[p] === 0x23) {
+                            p++;
+                            n = integer();
+                        }
+                        if (n >= 0) {
+                            for (let i = 0; i < n; i++) {
+                                const k = str();
+                                o[k] = value();
+                            }
+                        } else {
+                            while (buffer[p] !== 0x7D) {
+                                const k = str();
+                                o[k] = value();
+                            }
+                            p++;
+                        }
+                        return o;
+                    }
+                    case 0x5B: {
+                        if (buffer[p] === 0x5D) {
+                            p++;
+                            return [];
+                        }
+                        if (buffer[p] === 0x24) {
+                            p++;
+                            const t = buffer[p++];
+                            if (buffer[p++] !== 0x23) {
+                                throw new python.Error('UBJSON typed array missing count.');
+                            }
+                            return typed(t, integer());
+                        }
+                        let n = -1;
+                        if (buffer[p] === 0x23) {
+                            p++;
+                            n = integer();
+                        }
+                        if (n >= 0) {
+                            const a = new Array(n);
+                            for (let i = 0; i < n; i++) {
+                                a[i] = value();
+                            }
+                            return a;
+                        }
+                        const a = [];
+                        while (buffer[p] !== 0x5D) {
+                            a.push(value());
+                        }
+                        p++;
+                        return a;
+                    }
+                    default: throw new python.Error(`UBJSON marker '0x${m.toString(16)}'.`);
+                }
+            };
+            return value();
+        });
         this.registerType('xgboost.compat.XGBoostLabelEncoder', class {});
         this.registerType('xgboost.core.Booster', class {
-            load_model(fname) {
-                if (fname instanceof Uint8Array) {
-                    // XGBoosterLoadModel()
+            load_model(obj) {
+                if (obj instanceof Uint8Array) {
+                    this.XGBoosterLoadModelFromBuffer(obj);
                 } else {
-                    // XGBoosterUnserializeFromBuffer(handle) {
+                    this.XGBoosterLoadModel(obj);
                 }
+            }
+            XGBoosterLoadModel(obj) {
+                this.version = obj.version;
+                const learner = obj.learner;
+                const mparam = learner.learner_model_param || {};
+                this.base_score = mparam.base_score;
+                this.num_feature = parseInt(mparam.num_feature || '0', 10);
+                this.num_class = parseInt(mparam.num_class || '0', 10);
+                this.num_target = parseInt(mparam.num_target || '1', 10);
+                this.objective = learner.objective ? learner.objective.name : '';
+                this.feature_names = learner.feature_names || [];
+                this.feature_types = learner.feature_types || [];
+                this.attributes = learner.attributes || {};
+                const gb = learner.gradient_booster;
+                if (gb) {
+                    this.booster_type = gb.name;
+                    if (gb.name === 'gbtree' || gb.name === 'dart') {
+                        const gbtree = gb.name === 'dart' && gb.gbtree ? gb.gbtree : gb;
+                        const model = gbtree.model;
+                        const param = model.gbtree_model_param || {};
+                        this.num_trees = parseInt(param.num_trees || '0', 10);
+                        this.num_parallel_tree = parseInt(param.num_parallel_tree || '1', 10);
+                        this.trees = model.trees || [];
+                        this.tree_info = model.tree_info || [];
+                        if (gb.weight_drop) {
+                            this.weight_drop = gb.weight_drop;
+                        }
+                    } else if (gb.name === 'gblinear') {
+                        const model = gb.model;
+                        this.weights = model.weights || [];
+                        this.boosted_rounds = model.boosted_rounds || 0;
+                    }
+                }
+            }
+            XGBoosterLoadModelFromBuffer(buffer) {
+                if (buffer.length > 2 && buffer[0] === 0x7B && buffer[1] !== 0x22) {
+                    const obj = execution.invoke('ubjson.loadb', [buffer]);
+                    this.XGBoosterLoadModel(obj);
+                    return;
+                }
+                throw new python.Error('Unsupported XGBoost binary format.');
+            }
+            XGBoosterUnserializeFromBuffer(buffer) {
+                if (buffer.length > 2 && buffer[0] === 0x7B && buffer[1] !== 0x22) {
+                    const obj = execution.invoke('ubjson.loadb', [buffer]);
+                    this.XGBoosterLoadModel(obj.Model);
+                    return;
+                }
+                throw new python.Error('Unsupported XGBoost binary format.');
             }
             __setstate__(state) {
                 const handle = state.get('handle');
                 if (handle) {
-                    this.handle = handle;
-                    // XGBoosterLoadModelFromBuffer()
+                    if (handle.length > 2 && handle[0] === 0x7B && handle[1] !== 0x22) {
+                        this.XGBoosterUnserializeFromBuffer(handle);
+                    }
                 }
             }
         });
@@ -4578,7 +4942,11 @@ python.Execution = class {
             return obj.length;
         });
         this.registerFunction('builtins.setattr', (obj, name, value) => {
-            obj[name] = value;
+            if (obj && obj.__setattr__) {
+                obj.__setattr__(name, value);
+            } else {
+                obj[name] = value;
+            }
         });
         this.registerType('builtins.set', class extends Set {
             __contains__(item) {
@@ -4598,6 +4966,16 @@ python.Execution = class {
             }
         });
         this.registerFunction('builtins.hash');
+        this.registerType('functools.partial', class {});
+        this.registerFunction('functools.reduce', (func, iterable, ...args) => {
+            const iter = Array.from(iterable);
+            let acc = args.length > 0 ? args[0] : iter.shift();
+            for (const item of iter) {
+                acc = func(acc, item);
+            }
+            return acc;
+        });
+        builtins.reduce = functools.reduce;
         this.registerFunction('cloudpickle.cloudpickle._builtin_type', (name) => {
             return name;
         });
@@ -4688,7 +5066,39 @@ python.Execution = class {
         this.registerFunction('cloudpickle.cloudpickle_fast._function_setstate');
         const ray = this.register('ray');
         this.register('ray.cloudpickle.cloudpickle');
+        this.register('ray.cloudpickle.cloudpickle_fast');
         ray.cloudpickle.cloudpickle._builtin_type = cloudpickle.cloudpickle._builtin_type;
+        ray.cloudpickle.cloudpickle._fill_function = cloudpickle.cloudpickle._fill_function;
+        ray.cloudpickle.cloudpickle._make_cell = cloudpickle.cloudpickle._make_cell;
+        ray.cloudpickle.cloudpickle._make_function = cloudpickle.cloudpickle._make_function;
+        ray.cloudpickle.cloudpickle._make_skel_func = cloudpickle.cloudpickle._make_skel_func;
+        ray.cloudpickle.cloudpickle._make_skeleton_class = cloudpickle.cloudpickle._make_skeleton_class;
+        ray.cloudpickle.cloudpickle._make_empty_cell = cloudpickle.cloudpickle._make_empty_cell;
+        ray.cloudpickle.cloudpickle._empty_cell_value = cloudpickle.cloudpickle._empty_cell_value;
+        ray.cloudpickle.cloudpickle._class_setstate = cloudpickle.cloudpickle._class_setstate;
+        ray.cloudpickle.cloudpickle._function_setstate = cloudpickle.cloudpickle._function_setstate;
+        ray.cloudpickle.cloudpickle._lookup_class_or_track = cloudpickle.cloudpickle._lookup_class_or_track;
+        ray.cloudpickle.cloudpickle_fast._class_setstate = cloudpickle.cloudpickle._class_setstate;
+        ray.cloudpickle.cloudpickle_fast._function_setstate = cloudpickle.cloudpickle._function_setstate;
+        this.registerType('ray.rllib.algorithms.ppo.ppo.PPO', class {});
+        this.registerType('ray.rllib.algorithms.ppo.ppo.PPOConfig', class {});
+        this.registerType('ray.rllib.algorithms.algorithm_config.AlgorithmConfig', class {});
+        this.registerFunction('ray.rllib.algorithms.algorithm_config.AlgorithmConfig.DEFAULT_POLICY_MAPPING_FN');
+        this.registerType('ray.rllib.algorithms.algorithm_config.TorchCompileWhatToCompile', class {});
+        this.registerType('ray.rllib.evaluation.collectors.simple_list_collector.SimpleListCollector', class {});
+        this.registerType('ray.rllib.callbacks.callbacks.RLlibCallback', class {});
+        this.registerType('ray.rllib.core.learner.learner.TorchCompileWhatToCompile', class {});
+        this.registerType('ray.rllib.policy.policy.PolicySpec', class {});
+        this.registerType('ray.rllib.policy.sample_batch.SampleBatch', class {});
+        this.registerType('ray.rllib.utils.metrics.stats.mean.MeanStats', class {});
+        this.registerType('ray.rllib.utils.metrics.stats.ema.EmaStats', class {});
+        this.registerType('ray.rllib.utils.metrics.stats.min.MinStats', class {});
+        this.registerType('ray.rllib.utils.metrics.stats.max.MaxStats', class {});
+        this.registerType('ray.rllib.utils.metrics.stats.sum.SumStats', class {});
+        this.registerType('ray.rllib.utils.metrics.stats.lifetime_sum.LifetimeSumStats', class {});
+        this.registerType('ray.rllib.utils.metrics.stats.percentiles.PercentilesStats', class {});
+        this.registerType('ray.rllib.utils.metrics.stats.item.ItemStats', class {});
+        this.registerType('ray.rllib.utils.metrics.stats.item_series.ItemSeriesStats', class {});
         this.registerType('collections.Counter', class {});
         this.registerFunction('collections.defaultdict', (/* default_factory */) => {
             return {};
@@ -5091,10 +5501,8 @@ python.Execution = class {
                     throw new python.Error(`Unsupported data type '${dtype.str}'.`);
                 }
             }
-            if (fortran_order) {
-                data = null;
-            }
-            return self.invoke('numpy.ndarray', [shape, dtype, data]);
+            const order = fortran_order ? 'F' : 'C';
+            return new numpy.ndarray(shape, dtype, data, undefined, undefined, order);
         });
         this.registerFunction('numpy.save', (file, arr) => {
             const descr = arr.dtype.str;
@@ -5229,7 +5637,7 @@ python.Execution = class {
                                 context.view.setInt32(context.position, data[i], littleendian);
                                 break;
                             case 'i8':
-                                context.view.setBigInt64(context.position, data[i], littleendian);
+                                context.view.setBigInt64(context.position, typeof data[i] === 'number' ? BigInt(data[i]) : data[i], littleendian);
                                 break;
                             case 'u1':
                                 context.view.setUint8(context.position, data[i], littleendian);
@@ -5241,13 +5649,13 @@ python.Execution = class {
                                 context.view.setUint32(context.position, data[i], littleendian);
                                 break;
                             case 'u8':
-                                context.view.setBigUint64(context.position, data[i], littleendian);
+                                context.view.setComplexFloat16(context.position, data[i], littleendian);
                                 break;
                             case 'c8':
-                                context.view.setComplex64(context.position, data[i], littleendian);
+                                context.view.setComplexFloat32(context.position, data[i], littleendian);
                                 break;
                             case 'c16':
-                                context.view.setComplex128(context.position, data[i], littleendian);
+                                context.view.setComplexFloat64(context.position, data[i], littleendian);
                                 break;
                             case 'b1':
                                 context.view.setInt8(context.position, data[i] ? 1 : 0);
@@ -5307,9 +5715,18 @@ python.Execution = class {
         this.registerFunction('numpy.random._pickle.__randomstate_ctor', () => {
             return {};
         });
-        this.registerType('numpy.random.bit_generator.BitGenerator', class {});
+        this.registerType('numpy.random.bit_generator.BitGenerator', class {
+            __setstate__(state) {
+                if (state instanceof Map || !Array.isArray(state)) {
+                    this.state = state;
+                } else {
+                    [this.state, this._seed_seq] = state;
+                }
+            }
+        });
         this.registerType('numpy.random.bit_generator.SeedSequence', class extends builtins.object {
-            __setstate__(/* state */) {
+            __setstate__(state) {
+                [this.entropy, this.n_children_spawned, this.pool, this.pool_size, this.spawn_key] = state;
             }
         });
         this.registerFunction('numpy.random.bit_generator.__pyx_unpickle_SeedSequence', (cls, checksum, state) => {
@@ -5350,10 +5767,14 @@ python.Execution = class {
             throw new python.Error(`Unknown bit generator '${bit_generator}'.`);
         });
         this.registerFunction('numpy.random._pickle.__generator_ctor', (bit_generator_name, bit_generator_ctor) => {
+            if (bit_generator_name instanceof numpy.random.bit_generator.BitGenerator) {
+                return new numpy.random._generator.Generator(bit_generator_name);
+            }
             bit_generator_ctor = bit_generator_ctor || numpy.random._pickle.__bit_generator_ctor;
             return new numpy.random._generator.Generator(bit_generator_ctor(bit_generator_name));
         });
         this.registerFunction('numpy.reshape');
+        this.registerFunction('sklearn.feature_selection._mutual_info.mutual_info_regression');
         this.registerFunction('sklearn.feature_selection._univariate_selection.f_classif');
         this.registerFunction('sklearn.feature_selection._univariate_selection.f_regression');
         this.registerFunction('sklearn.metrics.scorer._passthrough_scorer');
@@ -5383,6 +5804,226 @@ python.Execution = class {
             return function() {
                 return self.invoke(`types.${args[0]}`, args);
             };
+        });
+        this.registerType('sympy.printing.defaults.Printable', class {});
+        this.registerType('sympy.core.basic.Basic', class extends sympy.printing.defaults.Printable {
+            constructor(...args) {
+                super();
+                this._args = args;
+            }
+            get args() {
+                return this._args;
+            }
+        });
+        this.registerType('sympy.core.function.Function', class extends sympy.core.basic.Basic {
+        });
+        this.registerType('sympy.core.expr.Expr', class extends sympy.core.basic.Basic {
+        });
+        this.registerType('sympy.core.operations.AssocOp', class extends sympy.core.expr.Expr /* sympy.core.basic.Basic */ {});
+        this.registerType('sympy.core.power.Pow', class extends sympy.core.expr.Expr {
+            __str__() {
+                return this._args.map((a) => a.__str__()).join('**');
+            }
+        });
+        this.registerType('sympy.core.add.Add', class extends sympy.core.operations.AssocOp {
+            __str__() {
+                return this._args.map((a) => a.__str__()).join(' + ');
+            }
+        });
+        this.registerType('sympy.core.mul.Mul', class extends sympy.core.operations.AssocOp {
+            __str__() {
+                return this._args.map((a) => a.__str__()).join('*');
+            }
+        });
+        this.registerType('sympy.core.numbers.Float', class extends sympy.core.expr.Expr {});
+        this.registerType('sympy.core.numbers.Half', class extends sympy.core.expr.Expr {});
+        this.registerType('sympy.core.numbers.NegativeOne', class extends sympy.core.expr.Expr {});
+        this.registerType('sympy.core.numbers.Number', class extends sympy.core.expr.Expr {});
+        this.registerType('sympy.core.numbers.One', class extends sympy.core.expr.Expr {});
+        this.registerType('sympy.core.numbers.Rational', class extends sympy.core.numbers.Number {});
+        this.registerType('sympy.core.numbers.Integer', class extends sympy.core.numbers.Rational {
+            constructor(value) {
+                super();
+                this.value = value;
+                this.is_Integer = true;
+            }
+            __int__() {
+                return this.value;
+            }
+            __str__() {
+                return this.value.toString();
+            }
+        });
+        this.registerType('sympy.core.numbers.Zero', class extends sympy.core.expr.Expr {});
+        this.registerType('sympy.core.symbol.Symbol', class extends sympy.core.expr.Expr {
+            constructor(name) {
+                super();
+                this.name = name;
+            }
+            __int__() {
+                throw new python.Error('Cannot convert symbols to int.');
+            }
+            __str__() {
+                return this.name;
+            }
+        });
+        this.registerType('sympy.core.relational.Relational', class extends sympy.core.expr.Expr {
+            constructor(lhs, rhs, op) {
+                super();
+                this._args = [lhs, rhs];
+                this._op = op;
+            }
+            __str__() {
+                return `${this._args[0].__str__()} ${this._op} ${this._args[1].__str__()}`;
+            }
+        });
+        this.registerType('sympy.core.relational._Inequality', class extends sympy.core.relational.Relational {
+        });
+        this.registerType('sympy.core.relational._Greater', class extends sympy.core.relational._Inequality {
+        });
+        this.registerType('sympy.core.relational.GreaterThan', class extends sympy.core.relational._Greater {
+            constructor(lhs, rhs) {
+                super(lhs, rhs, '>=');
+            }
+        });
+        this.registerType('sympy.core.relational._Less', class extends sympy.core.relational._Inequality {
+        });
+        this.registerType('sympy.core.relational.LessThan', class extends sympy.core.relational.Relational {
+            constructor(lhs, rhs) {
+                super(lhs, rhs, '<=');
+            }
+        });
+        this.registerType('sympy.core.relational.StrictLessThan', class extends sympy.core.relational.Relational {
+            constructor(lhs, rhs) {
+                super(lhs, rhs, '<');
+            }
+        });
+        this.registerType('sympy.core.relational.StrictGreaterThan', class extends sympy.core.relational.Relational {
+            constructor(lhs, rhs) {
+                super(lhs, rhs, '>');
+            }
+        });
+        this.registerType('sympy.core.relational.Equality', class extends sympy.core.relational.Relational {
+            constructor(lhs, rhs) {
+                super(lhs, rhs, '==');
+            }
+        });
+        this.registerType('sympy.core.relational.Unequality', class extends sympy.core.relational.Relational {
+            constructor(lhs, rhs) {
+                super(lhs, rhs, '!=');
+            }
+        });
+        this.registerType('sympy.functions.elementary.miscellaneous.MinMaxBase', class extends sympy.core.expr.Expr {
+        });
+        this.registerType('sympy.functions.elementary.miscellaneous.Max', class extends sympy.functions.elementary.miscellaneous.MinMaxBase {
+            __str__() {
+                return `Max(${this._args.map((a) => a.__str__()).join(', ')})`;
+            }
+        });
+        this.registerType('sympy.functions.elementary.miscellaneous.Min', class extends sympy.functions.elementary.miscellaneous.MinMaxBase {
+            __str__() {
+                return `Min(${this._args.map((a) => a.__str__()).join(', ')})`;
+            }
+        });
+        this.registerType('sympy.functions.elementary.exponential.exp', class extends sympy.core.expr.Expr {});
+        this.registerType('sympy.functions.elementary.exponential.log', class extends sympy.core.expr.Expr {});
+        this.registerType('sympy.functions.elementary.piecewise.ExprCondPair', class extends sympy.core.expr.Expr {});
+        this.registerType('sympy.functions.elementary.piecewise.Piecewise', class extends sympy.core.expr.Expr {});
+        this.registerType('sympy.logic.boolalg.BooleanFalse', class extends sympy.core.basic.Basic {});
+        this.registerType('sympy.logic.boolalg.BooleanTrue', class extends sympy.core.basic.Basic {});
+        this.registerType('sympy.logic.boolalg.ITE', class extends sympy.core.basic.Basic {});
+        this.registerType('sympy.logic.boolalg.Or', class extends sympy.core.basic.Basic {});
+        this.registerFunction('sympy.core.sympify.sympify', (a /*, locals */) => {
+            if (a instanceof sympy.core.expr.Expr) {
+                return a;
+            }
+            if (typeof a === 'bigint') {
+                return new sympy.core.numbers.Integer(Number(a));
+            }
+            if (typeof a === 'number') {
+                if (Number.isInteger(a)) {
+                    return new sympy.core.numbers.Integer(a);
+                }
+                return new sympy.core.numbers.Float(a);
+            }
+            if (typeof a === 'boolean') {
+                return a ? new sympy.logic.boolalg.BooleanTrue() : new sympy.logic.boolalg.BooleanFalse();
+            }
+            if (typeof a !== 'string') {
+                throw new python.Error(`Cannot sympify object of type '${typeof a}'.`);
+            }
+            const p = ast.parse(a);
+            const sympify = (node) => {
+                if (node instanceof ast.Call) {
+                    switch (node.func.id) {
+                        case 'Symbol': return new sympy.core.symbol.Symbol(node.args[0].value);
+                        case 'Mul': return new sympy.core.mul.Mul(...node.args.map((arg) => sympify(arg)));
+                        case 'Add': return new sympy.core.add.Add(...node.args.map((arg) => sympify(arg)));
+                        case 'Pow': return new sympy.core.power.Pow(...node.args.map((arg) => sympify(arg)));
+                        case 'Max': return new sympy.functions.elementary.miscellaneous.Max(...node.args.map((arg) => sympify(arg)));
+                        case 'Min': return new sympy.functions.elementary.miscellaneous.Min(...node.args.map((arg) => sympify(arg)));
+                        case 'Integer': return sympify(node.args[0]);
+                        case 'GreaterThan': return new sympy.core.relational.GreaterThan(sympify(node.args[0]), sympify(node.args[1]));
+                        case 'StrictGreaterThan': return new sympy.core.relational.StrictGreaterThan(sympify(node.args[0]), sympify(node.args[1]));
+                        case 'LessThan': return new sympy.core.relational.LessThan(sympify(node.args[0]), sympify(node.args[1]));
+                        case 'StrictLessThan': return new sympy.core.relational.StrictLessThan(sympify(node.args[0]), sympify(node.args[1]));
+                        case 'Equality': return new sympy.core.relational.Equality(sympify(node.args[0]), sympify(node.args[1]));
+                        case 'Unequality': return new sympy.core.relational.Unequality(sympify(node.args[0]), sympify(node.args[1]));
+                        case 'FloorDiv': return new torch.utils._sympy.functions.FloorDiv(sympify(node.args[0]), sympify(node.args[1]));
+                        default: throw new python.Error(`Unsupported SymPy function '${node.func.id}'.`);
+                    }
+                }
+                if (node instanceof ast.Name) {
+                    return new sympy.core.symbol.Symbol(node.id);
+                }
+                if (node instanceof ast.Constant) {
+                    if (node.type === 'int') {
+                        return new sympy.core.numbers.Integer(node.value);
+                    }
+                }
+                if (node instanceof ast.UnaryOp && node.op instanceof ast.USub) {
+                    const operand = sympify(node.operand);
+                    return new sympy.core.numbers.Integer(-operand.value);
+                }
+                if (node instanceof ast.BinOp) {
+                    if (node.op instanceof ast.Mult) {
+                        return new sympy.core.mul.Mul(sympify(node.left), sympify(node.right));
+                    }
+                    if (node.op instanceof ast.Pow) {
+                        return new sympy.core.power.Pow(sympify(node.left), sympify(node.right));
+                    }
+                    if (node.op instanceof ast.Add) {
+                        return new sympy.core.add.Add(sympify(node.left), sympify(node.right));
+                    }
+                    throw new python.Error(`Unsupported SymPy BinOp op '${node.op.__class__.__name__}'.`);
+                }
+                if (node instanceof ast.Compare) {
+                    const left = sympify(node.left);
+                    const right = sympify(node.comparators[0]);
+                    const [op] = node.ops;
+                    if (op instanceof ast.Gt) {
+                        return new sympy.core.relational.StrictGreaterThan(left, right);
+                    }
+                    if (op instanceof ast.GtE) {
+                        return new sympy.core.relational.GreaterThan(left, right);
+                    }
+                    if (op instanceof ast.Lt) {
+                        return new sympy.core.relational.StrictLessThan(left, right);
+                    }
+                    if (op instanceof ast.LtE) {
+                        return new sympy.core.relational.LessThan(left, right);
+                    }
+                    if (op instanceof ast.Eq) {
+                        return new sympy.core.relational.Equality(left, right);
+                    }
+                    if (op instanceof ast.NotEq) {
+                        return new sympy.core.relational.Unequality(left, right);
+                    }
+                    throw new python.Error(`Unsupported comparison operator '${op.__class__.__name__}'.`);
+                }
+                throw new python.Error(`Unsupported SymPy expression '${node.__class__.__name__}'.`);
+            };
+            return sympify(p.body[0].value);
         });
         this.registerFunction('theano.scalar.basic.same_out');
         this.registerFunction('theano.scalar.basic.same_out_nocomplex');
@@ -5471,6 +6112,7 @@ python.Execution = class {
         });
         torch.nn.Module = torch.nn.modules.module.Module;
         torch.nn.modules.Module = torch.nn.modules.module.Module;
+        this.registerType('torch._C.Generator', class {});
         this.registerType('torch._C._TensorBase', class extends builtins.object {});
         this.registerType('torch._C._TensorMeta', class extends builtins.type {});
         this.registerType('torch._C._VariableFunctionsClass', class extends builtins.object {});
@@ -6055,7 +6697,7 @@ python.Execution = class {
             constructor(inputs, return_types, return_field_names, schema_name) {
                 this.inputs = inputs;
                 this.return_types = return_types;
-                this.register_field_names = return_field_names;
+                this.return_field_names = return_field_names;
                 this.schema_name = schema_name;
             }
         });
@@ -6376,6 +7018,14 @@ python.Execution = class {
                         }
                         break;
                     }
+                    case 'c': {
+                        const lc = lhs.c(name);
+                        const rc = rhs.c(name);
+                        if (lc.real !== rc.real || lc.imag !== rc.imag) {
+                            return false;
+                        }
+                        break;
+                    }
                     case 'ival': {
                         if (lhs[kind](name) !== rhs[kind](name)) {
                             return false;
@@ -6400,6 +7050,8 @@ python.Execution = class {
                     for (const item of value) {
                         hash += torch._C.get_hash(item);
                     }
+                } else if (value instanceof builtins.complex) {
+                    hash += (value.real | 0) + (value.imag | 0);
                 }
             }
             return hash;
@@ -7156,19 +7808,19 @@ python.Execution = class {
             }
             return changed;
         });
-        this.registerFunction('torch._C.TORCH_INTERNAL_ASSERT', (cond) => {
+        this.registerFunction('torch._C.TORCH_INTERNAL_ASSERT', (cond, ...args) => {
             if (!cond) {
-                throw new python.Error('Assertion failed.');
+                throw new python.Error(`Assertion failed.${args.length > 0 ? ` ${args.join('')}` : ''}`);
             }
         });
-        this.registerFunction('torch._C.TORCH_CHECK', (cond) => {
+        this.registerFunction('torch._C.TORCH_CHECK', (cond, ...args) => {
             if (!cond) {
-                throw new python.Error('Assertion failed.');
+                throw new python.Error(`Assertion failed.${args.length > 0 ? ` ${args.join('')}` : ''}`);
             }
         });
-        this.registerFunction('torch._C.AT_ASSERT', (cond) => {
+        this.registerFunction('torch._C.AT_ASSERT', (cond, ...args) => {
             if (!cond) {
-                throw new python.Error('Assertion failed.');
+                throw new python.Error(`Assertion failed.${args.length > 0 ? ` ${args.join('')}` : ''}`);
             }
         });
         this.registerFunction('torch._C.eraseListLiterals', (graph) => {
@@ -7257,11 +7909,11 @@ python.Execution = class {
                             const name = node.s('name');
                             const fn = class_type.getMethod(name);
                             if (!fn.isGraphFunction()) {
-                                torch._C.TORCH_INTERNAL_ASSERT(!incompatible_amp.has_value() || incompatible_amp.value());
+                                torch._C.TORCH_INTERNAL_ASSERT(!incompatible_amp.has_value() || incompatible_amp.value(), 'Calls are not expected with AMP & JIT');
                                 incompatible_amp = true;
                             }
                         } else {
-                            torch._C.TORCH_INTERNAL_ASSERT(!incompatible_amp.has_value() || incompatible_amp.value());
+                            torch._C.TORCH_INTERNAL_ASSERT(!incompatible_amp.has_value() || incompatible_amp.value(), 'Unexpected prim::CallMethod form with AMP & JIT');
                             incompatible_amp = true;
                         }
                         break;
@@ -7271,7 +7923,7 @@ python.Execution = class {
                             if (node.hasUses()) {
                                 torch._C.TORCH_CHECK(false, "`with autocast() as ...` is not supported");
                             }
-                            torch._C.TORCH_INTERNAL_ASSERT(!incompatible_amp.has_value() || !incompatible_amp.value());
+                            torch._C.TORCH_INTERNAL_ASSERT(!incompatible_amp.has_value() || !incompatible_amp.value(), 'Unsupported case by AMP & JIT');
                             incompatible_amp = false;
                             autocast_stack.push(autocast_scope);
                         }
@@ -7281,7 +7933,7 @@ python.Execution = class {
                         if (torch._C.isAutocastNode(node.input(0))) {
                             torch._C.TORCH_INTERNAL_ASSERT(!autocast_stack.empty());
                             torch._C.TORCH_INTERNAL_ASSERT(autocast_stack.top().instance === node.input());
-                            torch._C.TORCH_INTERNAL_ASSERT(!incompatible_amp.has_value() || !incompatible_amp.value());
+                            torch._C.TORCH_INTERNAL_ASSERT(!incompatible_amp.has_value() || !incompatible_amp.value(), 'Unsupported case by AMP & JIT');
                             incompatible_amp = false;
                             autocast_stack.pop();
                         }
@@ -7534,7 +8186,11 @@ python.Execution = class {
         this.registerType('torch.utils._contextlib._DecoratorContextManager', class {});
         this.registerType('torch.utils._contextlib._NoParamDecoratorContextManager', class extends torch.utils._contextlib._DecoratorContextManager {});
         this.registerType('torch.utils._sympy.symbol.SymT', class extends this.enum.Enum {});
-        this.registerType('torch.utils._sympy.functions.FloorDiv', class {});
+        this.registerType('torch.utils._sympy.functions.FloorDiv', class extends sympy.core.function.Function {
+            __str__() {
+                return this._args.map((a) => a.__str__()).join('//');
+            }
+        });
         this.registerType('torch.utils._sympy.functions.ModularIndexing', class {});
         this.registerType('torch.utils._sympy.functions.Where', class {});
         this.registerType('torch.utils._sympy.functions.PythonMod', class {});
@@ -7573,6 +8229,7 @@ python.Execution = class {
         this.registerType('torch.utils.data.sampler.RandomSampler', class {});
         this.registerType('torch.utils.data.sampler.SequentialSampler', class {});
         this.registerType('torch.utils.data.sampler.SubsetRandomSampler', class {});
+        this.registerType('torch.utils.data.sampler.WeightedRandomSampler', class {});
         this.registerType('torch.ao.quantization.fake_quantize.FakeQuantize', class {});
         this.registerType('torch.ao.quantization.fake_quantize.FusedMovingAvgObsFakeQuantize', class {});
         this.registerType('torch.ao.quantization.observer._PartialWrapper', class {});
@@ -7628,6 +8285,10 @@ python.Execution = class {
         this.registerType('torch.distributed._tensor.placement_types.Shard', class {});
         this.registerType('torch.distributed._tensor.placement_types.TensorMeta', class {});
         this.registerType('torch.distributed.device_mesh.DeviceMesh', class {});
+        this.registerType('torch.distributed.tensor.DTensor', class extends torch._C._TensorMeta {});
+        this.registerType('torch.distributed.tensor._dtensor_spec.DTensorSpec', class {});
+        this.registerType('torch.distributed.tensor._dtensor_spec.TensorMeta', class {});
+        this.registerType('torch.distributed.tensor.placement_types.Shard', class {});
         this.registerType('torch.distributions.bernoulli.Bernoulli', class {});
         this.registerType('torch.distributions.beta.Beta', class {});
         this.registerType('torch.distributions.binomial.Binomial', class {});
@@ -7918,6 +8579,7 @@ python.Execution = class {
         this.registerType('torch.ao.nn.intrinsic.modules.fused.ConvBnReLU2d', class extends torch.ao.nn.intrinsic.modules.fused._FusedModule {});
         this.registerType('torch.ao.nn.intrinsic.qat.modules.conv_fused.ConvBnReLU2d', class {});
         this.registerType('torch.nn.utils.prune.CustomFromMask', class {});
+        this.registerType('torch.nn.utils.prune.Identity', class {});
         this.registerType('torch.nn.utils.prune.L1Unstructured', class {});
         this.registerType('torch.nn.utils.prune.LnStructured', class {});
         this.registerType('torch.nn.utils.prune.PruningContainer', class {});
@@ -7931,10 +8593,13 @@ python.Execution = class {
         this.registerType('torch.torch_version.TorchVersion', class extends String {});
         this.registerType('torch.optim.optimizer.Optimizer', class {});
         this.registerType('torch.optim.adam.Adam', class extends torch.optim.optimizer.Optimizer {});
+        this.registerType('torch.optim.adamax.Adamax', class {});
         this.registerType('torch.optim.adamw.AdamW', class {});
         this.registerType('torch.optim.adagrad.Adagrad', class {});
         this.registerType('torch.optim.adadelta.Adadelta', class {});
         this.registerType('torch.optim.lbfgs.LBFGS', class {});
+        this.registerType('torch.optim.Muon', class {});
+        this.registerType('torch.optim.nadam.NAdam', class {});
         this.registerType('torch.optim.lr_scheduler.CosineAnnealingLR', class {});
         this.registerType('torch.optim.lr_scheduler.CosineAnnealingWarmRestarts', class {});
         this.registerType('torch.optim.lr_scheduler.CyclicLR', class {});
@@ -7942,6 +8607,7 @@ python.Execution = class {
         this.registerType('torch.optim.lr_scheduler.LambdaLR', class {});
         this.registerType('torch.optim.lr_scheduler.LinearLR', class {});
         this.registerType('torch.optim.lr_scheduler.MultiStepLR', class {});
+        this.registerType('torch.optim.lr_scheduler.SequentialLR', class {});
         this.registerType('torch.optim.lr_scheduler.OneCycleLR', class {});
         this.registerType('torch.optim.lr_scheduler.ReduceLROnPlateau', class {});
         this.registerType('torch.optim.lr_scheduler.StepLR', class {});
@@ -8034,173 +8700,6 @@ python.Execution = class {
             */
             return false;
         });
-        this.registerType('sympy.printing.defaults.Printable', class {});
-        this.registerType('sympy.core.basic.Basic', class extends sympy.printing.defaults.Printable {
-            constructor(...args) {
-                super();
-                this._args = args;
-            }
-            get args() {
-                return this._args;
-            }
-        });
-        this.registerType('sympy.core.expr.Expr', class extends sympy.core.basic.Basic {
-        });
-        this.registerType('sympy.core.operations.AssocOp', class extends sympy.core.expr.Expr /* sympy.core.basic.Basic */ {});
-        this.registerType('sympy.core.power.Pow', class extends sympy.core.expr.Expr {
-            __str__() {
-                return this._args.map((a) => a.__str__()).join('**');
-            }
-        });
-        this.registerType('sympy.core.add.Add', class extends sympy.core.operations.AssocOp {
-            __str__() {
-                return this._args.map((a) => a.__str__()).join(' + ');
-            }
-        });
-        this.registerType('sympy.core.mul.Mul', class extends sympy.core.operations.AssocOp {
-            __str__() {
-                return this._args.map((a) => a.__str__()).join('*');
-            }
-        });
-        this.registerType('sympy.core.numbers.Number', class extends sympy.core.expr.Expr {});
-        this.registerType('sympy.core.numbers.Rational', class extends sympy.core.numbers.Number {});
-        this.registerType('sympy.core.numbers.Integer', class extends sympy.core.numbers.Rational {
-            constructor(value) {
-                super();
-                this.value = value;
-                this.is_Integer = true;
-            }
-            __int__() {
-                return this.value;
-            }
-            __str__() {
-                return this.value.toString();
-            }
-        });
-        this.registerType('sympy.core.symbol.Symbol', class extends sympy.core.expr.Expr {
-            constructor(name) {
-                super();
-                this.name = name;
-            }
-            __int__() {
-                throw new python.Error('Cannot convert symbols to int.');
-            }
-            __str__() {
-                return this.name;
-            }
-        });
-        this.registerType('sympy.core.relational.Relational', class extends sympy.core.expr.Expr {
-            constructor(lhs, rhs, op) {
-                super();
-                this._args = [lhs, rhs];
-                this._op = op;
-            }
-            __str__() {
-                return `${this._args[0].__str__()} ${this._op} ${this._args[1].__str__()}`;
-            }
-        });
-        this.registerType('sympy.core.relational._Inequality', class extends sympy.core.relational.Relational {
-        });
-        this.registerType('sympy.core.relational._Greater', class extends sympy.core.relational._Inequality {
-        });
-        this.registerType('sympy.core.relational.GreaterThan', class extends sympy.core.relational._Greater {
-            constructor(lhs, rhs) {
-                super(lhs, rhs, '>=');
-            }
-        });
-        this.registerType('sympy.core.relational._Less', class extends sympy.core.relational._Inequality {
-        });
-        this.registerType('sympy.core.relational.LessThan', class extends sympy.core.relational.Relational {
-            constructor(lhs, rhs) {
-                super(lhs, rhs, '<=');
-            }
-        });
-        this.registerType('sympy.core.relational.StrictLessThan', class extends sympy.core.relational.Relational {
-            constructor(lhs, rhs) {
-                super(lhs, rhs, '<');
-            }
-        });
-        this.registerType('sympy.core.relational.StrictGreaterThan', class extends sympy.core.relational.Relational {
-            constructor(lhs, rhs) {
-                super(lhs, rhs, '>');
-            }
-        });
-        this.registerType('sympy.core.relational.Equality', class extends sympy.core.relational.Relational {
-            constructor(lhs, rhs) {
-                super(lhs, rhs, '==');
-            }
-        });
-        this.registerType('sympy.functions.elementary.miscellaneous.MinMaxBase', class extends sympy.core.expr.Expr {
-        });
-        this.registerType('sympy.functions.elementary.miscellaneous.Max', class extends sympy.functions.elementary.miscellaneous.MinMaxBase {
-            __str__() {
-                return `Max(${this._args.map((a) => a.__str__()).join(', ')})`;
-            }
-        });
-        this.registerFunction('sympy.core.sympify.sympify', (a /*, locals */) => {
-            if (a instanceof sympy.core.expr.Expr) {
-                return a;
-            }
-            const p = ast.parse(a);
-            const sympify = (node) => {
-                if (node instanceof ast.Call) {
-                    switch (node.func.id) {
-                        case 'Symbol': return new sympy.core.symbol.Symbol(node.args[0].value);
-                        case 'Mul': return new sympy.core.mul.Mul(...node.args.map((arg) => sympify(arg)));
-                        case 'Add': return new sympy.core.add.Add(...node.args.map((arg) => sympify(arg)));
-                        case 'Pow': return new sympy.core.power.Pow(...node.args.map((arg) => sympify(arg)));
-                        case 'Max': return new sympy.functions.elementary.miscellaneous.Max(...node.args.map((arg) => sympify(arg)));
-                        case 'Integer': return new sympy.core.numbers.Integer(node.args[0].value);
-                        case 'GreaterThan': return new sympy.core.relational.GreaterThan(sympify(node.args[0]), sympify(node.args[1]));
-                        case 'StrictGreaterThan': return new sympy.core.relational.StrictGreaterThan(sympify(node.args[0]), sympify(node.args[1]));
-                        case 'LessThan': return new sympy.core.relational.LessThan(sympify(node.args[0]), sympify(node.args[1]));
-                        case 'StrictLessThan': return new sympy.core.relational.StrictLessThan(sympify(node.args[0]), sympify(node.args[1]));
-                        case 'Equality': return new sympy.core.relational.Equality(sympify(node.args[0]), sympify(node.args[1]));
-                        default: throw new python.Error(`Unsupported SymPy function '${node.func.id}'.`);
-                    }
-                }
-                if (node instanceof ast.Name) {
-                    return new sympy.core.symbol.Symbol(node.id);
-                }
-                if (node instanceof ast.Constant) {
-                    if (node.type === 'int') {
-                        return new sympy.core.numbers.Integer(node.value);
-                    }
-                }
-                if (node instanceof ast.BinOp) {
-                    if (node.op instanceof ast.Mult) {
-                        return new sympy.core.mul.Mul(sympify(node.left), sympify(node.right));
-                    }
-                    if (node.op instanceof ast.Pow) {
-                        return new sympy.core.power.Pow(sympify(node.left), sympify(node.right));
-                    }
-                    throw new python.Error(`Unsupported SymPy BinOp op '${node.op.__class__.__name__}'.`);
-                }
-                if (node instanceof ast.Compare) {
-                    const left = sympify(node.left);
-                    const right = sympify(node.comparators[0]);
-                    const [op] = node.ops;
-                    if (op instanceof ast.Gt) {
-                        return new sympy.core.relational.StrictGreaterThan(left, right);
-                    }
-                    if (op instanceof ast.GtE) {
-                        return new sympy.core.relational.GreaterThan(left, right);
-                    }
-                    if (op instanceof ast.Lt) {
-                        return new sympy.core.relational.StrictLessThan(left, right);
-                    }
-                    if (op instanceof ast.LtE) {
-                        return new sympy.core.relational.LessThan(left, right);
-                    }
-                    if (op instanceof ast.Eq) {
-                        return new sympy.core.relational.Equality(left, right);
-                    }
-                    throw new python.Error(`Unsupported comparison operator '${op.__class__.__name__}'.`);
-                }
-                throw new python.Error(`Unsupported SymPy expression '${node.__class__.__name__}'.`);
-            };
-            return sympify(p.body[0].value);
-        });
         this.registerType('torch.fx.proxy.TracerBase', class {
             constructor() {
                 this.traced_func_name = 'forward';
@@ -8291,6 +8790,13 @@ python.Execution = class {
             return torch.fx.graph_module._deserialize_graph_module(forward, body);
         });
         this.registerType('torch.fx.graph.CodeGen', class {});
+        this.registerType('torch.fx.graph._PyTreeInfo', class {
+            constructor(orig_args, in_spec, out_spec) {
+                this.orig_args = orig_args;
+                this.in_spec = in_spec;
+                this.out_spec = out_spec;
+            }
+        });
         this.registerType('torch.fx.graph._Namespace', class {
             constructor() {
                 this._obj_to_name = new Map();
@@ -8498,16 +9004,45 @@ python.Execution = class {
                 }
             }
         });
+        this.registerFunction('torch.fx.graph_module._copy_attr', (from_module, to_module, target) => {
+            const parts = target.split('.');
+            const field = parts.pop();
+            for (const item of parts) {
+                const f = builtins.getattr(from_module, item);
+                let t = builtins.getattr(to_module, item, null);
+                if (f === t) {
+                    return;
+                }
+                if (t === null) {
+                    t = new torch.nn.modules.module.Module();
+                    builtins.setattr(to_module, item, t);
+                }
+                from_module = f;
+                to_module = t;
+            }
+            const orig = builtins.getattr(from_module, field);
+            builtins.setattr(to_module, field, orig);
+        });
         this.registerType('torch.fx.graph_module.GraphModule', class extends torch.nn.modules.module.Module {
             constructor(root, graph, class_name) {
                 super();
                 this.__class__.__name__ = class_name || 'GraphModule';
                 this.graph = graph;
+                if (root instanceof torch.nn.modules.module.Module && graph && graph.nodes) {
+                    for (const node of graph.nodes) {
+                        if (node.op === 'get_attr' || node.op === 'call_module') {
+                            torch.fx.graph_module._copy_attr(root, this, node.target);
+                        }
+                    }
+                }
             }
         });
         torch.fx.Graph = torch.fx.graph.Graph;
         torch.fx.GraphModule = torch.fx.graph_module.GraphModule;
+        this.registerType('torch.fx.graph._FindNodesLookupTable', class {});
         this.registerType('torch.fx.immutable_collections.immutable_dict', class extends builtins.dict {});
+        this.registerType('torch.fx.immutable_collections.immutable_list', class extends builtins.list {});
+        this.registerType('torch.fx.passes.shape_prop.TensorMetadata', class {});
         this.registerFunction('torch.fx._symbolic_trace.wrap', (fn_or_name) => {
             return fn_or_name;
         });
@@ -8532,6 +9067,7 @@ python.Execution = class {
         this.registerType('torchvision.ops.poolers.LevelMapper', class {});
         this.registerType('torchvision.ops.poolers.MultiScaleRoIAlign', class {});
         this.registerType('torchvision.ops.roi_align.RoIAlign', class {});
+        this.registerType('torchvision.ops.drop_block.DropBlock3d', class {});
         this.registerType('torchvision.ops.stochastic_depth.StochasticDepth', class {});
         this.registerType('torchvision.models._api.Weights', class {});
         this.registerType('torchvision.models.alexnet.AlexNet', class {});
@@ -8619,6 +9155,7 @@ python.Execution = class {
         this.registerType('torchvision.models.mobilenetv2.MobileNetV2', class {});
         this.registerType('torchvision.models.mobilenetv3.InvertedResidual', class {});
         this.registerType('torchvision.models.mobilenetv3.MobileNetV3', class {});
+        this.registerType('torchvision.models.mobilenetv3.ConvBNActivation', class {});
         this.registerType('torchvision.models.mobilenetv3.SqueezeExcitation', class {});
         this.registerType('torchvision.models.regnet.AnyStage', class extends torch.nn.modules.container.Sequential {});
         this.registerType('torchvision.models.regnet.BottleneckTransform', class {});
@@ -8631,6 +9168,14 @@ python.Execution = class {
         this.registerType('torchvision.models.quantization.mobilenet.QuantizableMobileNetV2', class {});
         this.registerType('torchvision.models.quantization.mobilenetv2.QuantizableInvertedResidual', class {});
         this.registerType('torchvision.models.quantization.mobilenetv2.QuantizableMobileNetV2', class {});
+        this.registerType('torchvision.models.quantization.inception.QuantizableBasicConv2d', class {});
+        this.registerType('torchvision.models.quantization.inception.QuantizableInception3', class {});
+        this.registerType('torchvision.models.quantization.inception.QuantizableInceptionA', class {});
+        this.registerType('torchvision.models.quantization.inception.QuantizableInceptionAux', class {});
+        this.registerType('torchvision.models.quantization.inception.QuantizableInceptionB', class {});
+        this.registerType('torchvision.models.quantization.inception.QuantizableInceptionC', class {});
+        this.registerType('torchvision.models.quantization.inception.QuantizableInceptionD', class {});
+        this.registerType('torchvision.models.quantization.inception.QuantizableInceptionE', class {});
         this.registerType('torchvision.models.quantization.mobilenetv3.QuantizableMobileNetV3', class {});
         this.registerType('torchvision.models.quantization.mobilenetv3.QuantizableInvertedResidual', class {});
         this.registerType('torchvision.models.quantization.mobilenetv3.QuantizableSqueezeExcitation', class {});
@@ -8666,6 +9211,9 @@ python.Execution = class {
         this.registerType('torchvision.models.video.resnet.Conv3DSimple', class {});
         this.registerType('torchvision.models.video.resnet.R2Plus1dStem', class {});
         this.registerType('torchvision.models.video.resnet.VideoResNet', class {});
+        this.registerType('torchvision.models.video.swin_transformer.PatchEmbed3d', class {});
+        this.registerType('torchvision.models.video.swin_transformer.ShiftedWindowAttention3d', class {});
+        this.registerType('torchvision.models.video.swin_transformer.SwinTransformer3d', class {});
         this.registerType('torchvision.models.vision_transformer.Encoder', class extends torch.nn.modules.module.Module {});
         this.registerType('torchvision.models.vision_transformer.EncoderBlock', class extends torch.nn.modules.module.Module {});
         this.registerType('torchvision.models.vision_transformer.MLPBlock', class extends torchvision.ops.misc.MLP {});
@@ -8707,20 +9255,27 @@ python.Execution = class {
         this.registerType('torchvision.transforms.transforms.Scale', class extends torch.nn.modules.module.Module {});
         this.registerType('torchvision.transforms.transforms.ToPILImage', class {});
         this.registerType('torchvision.transforms.transforms.ToTensor', class {});
+        this.registerType('torchvision.transforms.v2._color.ColorJitter', class {});
         this.registerType('torchvision.transforms.v2._color.Grayscale', class {});
         this.registerType('torchvision.transforms.v2._color.RandomGrayscale', class {});
         this.registerType('torchvision.transforms.v2._container.Compose', class {});
+        this.registerType('torchvision.transforms.v2._container.RandomApply', class {});
         this.registerType('torchvision.transforms.v2._deprecated.ToTensor', class {});
+        this.registerType('torchvision.transforms.v2._meta.ConvertBoundingBoxFormat', class {});
         this.registerType('torchvision.transforms.v2._misc.ConvertImageDtype', class {});
         this.registerType('torchvision.transforms.v2._misc.Normalize', class {});
         this.registerType('torchvision.transforms.v2._misc.ToDtype', class {});
         this.registerType('torchvision.transforms.v2._geometry.CenterCrop', class {});
         this.registerType('torchvision.transforms.v2._geometry.Resize', class {});
         this.registerType('torchvision.transforms.v2._geometry.Pad', class {});
+        this.registerType('torchvision.transforms.v2._geometry.RandomAffine', class {});
         this.registerType('torchvision.transforms.v2._geometry.RandomCrop', class {});
+        this.registerType('torchvision.transforms.v2._geometry.RandomHorizontalFlip', class {});
+        this.registerType('torchvision.transforms.v2._geometry.RandomRotation', class {});
         this.registerType('torchvision.transforms.v2._transform.Transform', class extends torch.nn.modules.module.Module {});
         this.registerType('torchvision.transforms.v2._type_conversion.ToImage', class extends torchvision.transforms.v2._transform.Transform {});
         this.registerType('torchvision.transforms.v2._type_conversion.PILToTensor', class {});
+        this.registerType('torchvision.tv_tensors._bounding_boxes.BoundingBoxFormat', class {});
         this.registerFunction('torchvision.models.resnet.resnet18', () => {});
         this.registerFunction('torchvision.models.resnet.resnet34', () => {});
         this.registerFunction('torchvision.models.resnet.resnet50', () => {});
@@ -8728,6 +9283,7 @@ python.Execution = class {
         this.registerFunction('torchvision.models.resnet.resnet152', () => {});
         this.registerFunction('torchvision.models.vision_transformer.vit_h_14', () => {});
         this.registerFunction('torchvision.ops.boxes.box_iou');
+        this.registerFunction('torchvision.ops.focal_loss.sigmoid_focal_loss');
         this.registerFunction('builtins.annotate', (type, value) => {
             if (type === builtins.int) {
                 return Number.isInteger(value) ? value : NaN;
@@ -8753,6 +9309,20 @@ python.Execution = class {
                 if (isNaN(start)) {
                     return [];
                 }
+            }
+            if (Number.isInteger(start) && Number.isInteger(stop) && (step === undefined || Number.isInteger(step))) {
+                step = step === undefined ? 1 : step;
+                const result = [];
+                if (step > 0) {
+                    for (let i = start; i < stop; i += step) {
+                        result.push(i);
+                    }
+                } else if (step < 0) {
+                    for (let i = start; i > stop; i += step) {
+                        result.push(i);
+                    }
+                }
+                return result;
             }
             throw new python.Error(`Unsupported range(${JSON.stringify(start)}, ${JSON.stringify(stop)}, ${JSON.stringify(step)})`);
         });
@@ -8802,6 +9372,11 @@ python.Execution = class {
             // tensor = tensor.to(dtype, device)
             tensor.requires_grad = requires_grad;
             return tensor;
+        });
+        this.registerFunction('torch._utils._rebuild_device_tensor_from_cpu_tensor', (data, dtype, device, requires_grad) => {
+            data = data.clone();
+            data.requires_grad = requires_grad;
+            return data;
         });
         this.registerFunction('torch._sparse_coo_tensor_unsafe', (indices, values, size) => {
             const tensor = self.invoke('torch.Tensor', []);
@@ -8892,12 +9467,14 @@ python.Execution = class {
                 [dict_state, slots_state] = state;
             }
             if (dict_state) {
-                for (const [name, value] of Object.entries(dict_state)) {
+                const entries = dict_state instanceof Map ? dict_state : Object.entries(dict_state);
+                for (const [name, value] of entries) {
                     builtins.setattr(obj, name, value);
                 }
             }
             if (slots_state) {
-                for (const [name, value] of Object.entries(slots_state)) {
+                const entries = slots_state instanceof Map ? slots_state : Object.entries(slots_state);
+                for (const [name, value] of entries) {
                     builtins.setattr(obj, name, value);
                 }
             }
@@ -8909,7 +9486,7 @@ python.Execution = class {
         this.registerFunction('torch._tensor._rebuild_from_type_v2', (func, new_type, args, state) => {
             let ret = func(...args);
             if (ret.__class__ !== new_type) {
-                // ret = ret.as_subclass(new_type);
+                ret.__class__ = new_type;
             }
             const setstate = builtins.getattr(ret.__class__, '__setstate__', torch.Tensor.__setstate__);
             if (setstate === torch.Tensor.__setstate__) {
@@ -9002,15 +9579,24 @@ python.Execution = class {
         this.registerOperator('aten::replace', (value, oldvalue, newvalue /*, max */) => {
             return value.replace(oldvalue, newvalue);
         });
-        this.registerOperator('aten::add', (left, right) => {
-            if ((typeof left === 'number' || left instanceof Number) && (typeof right === 'number' || right instanceof Number)) {
-                return left + right;
+        this.registerOperator('aten::add', (a, b) => {
+            if ((typeof a === 'number' || a instanceof Number) && (typeof b === 'number' || b instanceof Number)) {
+                return a + b;
             }
-            if (Array.isArray(left) && Array.isArray(right)) {
-                return left.concat(right);
+            if (typeof a === 'number' && b instanceof builtins.complex) {
+                return new builtins.complex(a + b.real, b.imag);
             }
-            if (typeof left === 'string' && typeof right === 'string') {
-                return left + right;
+            if (a instanceof builtins.complex && typeof b === 'number') {
+                return new builtins.complex(a.real + b, a.imag);
+            }
+            if (a instanceof builtins.complex && b instanceof builtins.complex) {
+                return new builtins.complex(a.real + b.real, a.imag + b.imag);
+            }
+            if (Array.isArray(a) && Array.isArray(b)) {
+                return a.concat(b);
+            }
+            if (typeof a === 'string' && typeof b === 'string') {
+                return a + b;
             }
             throw new python.Error('Unsupported aten::add expression type.');
         });
@@ -9184,7 +9770,15 @@ python.Execution = class {
                 }
                 this._records = new Map(Array.from(entries).map(([name, value]) => [name.substring(prefix), value]));
                 this._version = 0;
-                const stream = this.get_record('.data/version') || this.get_record('version') || null;
+                this.init();
+            }
+            init() {
+                let stream = null;
+                if (this.has_record('.data/version')) {
+                    stream = this.get_record('.data/version');
+                } else if (this.has_record('version')) {
+                    stream = this.get_record('version');
+                }
                 if (stream) {
                     const decoder = new TextDecoder('utf-8');
                     const buffer = stream.peek();
@@ -9196,6 +9790,9 @@ python.Execution = class {
                 return this._records.has(name);
             }
             get_record(name) {
+                if (!this.has_record(name)) {
+                    throw new python.Error(`Record '${name}' not found.`);
+                }
                 return this._records.get(name);
             }
             get_all_records() {
@@ -9329,8 +9926,14 @@ python.Execution = class {
                             const [, storage_type, key, , numel] = saved_id;
                             if (!loaded_storages.has(key)) {
                                 const storage = new storage_type(numel);
+                                if (!storage._set_cdata) {
+                                    throw new python.Error(`'${storage_type.__name__}._set_cdata' is not a function.`);
+                                }
                                 const name = `data/${key}`;
                                 const stream = entries.get(name);
+                                if (!stream) {
+                                    throw new python.Error(`Record '${name}' not found.`);
+                                }
                                 storage._set_cdata(stream);
                                 loaded_storages.set(key, storage);
                             }
@@ -9360,6 +9963,15 @@ python.Execution = class {
                 throw new python.Error(`Unsupported 'torch.load' input '${JSON.stringify(Array.from(f.keys()))}'.`);
             }
             return _legacy_load(f);
+        });
+        this.registerOperator('prim::abs', (a) => {
+            if (typeof a === 'number' || a instanceof Number) {
+                return Math.abs(a);
+            }
+            if (a instanceof builtins.complex) {
+                return Math.hypot(a.real, a.imag);
+            }
+            throw new python.Error('Unsupported prim::abs expression type.');
         });
         this.registerOperator('prim::unchecked_cast', (type, value) => {
             return value;
@@ -9644,6 +10256,15 @@ python.Execution = class {
             if ((typeof left === 'number' || left instanceof Number) && (typeof right === 'number' || right instanceof Number)) {
                 return left - right;
             }
+            if (typeof left === 'number' && right instanceof builtins.complex) {
+                return new builtins.complex(left - right.real, right.imag);
+            }
+            if (left instanceof builtins.complex && typeof right === 'number') {
+                return new builtins.complex(left.real - right, left.imag);
+            }
+            if (left instanceof builtins.complex && right instanceof builtins.complex) {
+                return new builtins.complex(left.real - right.real, left.imag - right.imag);
+            }
             throw new python.Error("Unsupported 'torch.sub' expression type.");
         });
         this.registerFunction('torch.sym_int');
@@ -9669,6 +10290,7 @@ python.Execution = class {
         this.registerFunction('torch.nn.functional.hardsigmoid');
         this.registerFunction('torch.nn.functional.hardswish');
         this.registerFunction('torch.nn.functional.hardtanh');
+        this.registerFunction('torch.nn.functional.huber_loss');
         this.registerFunction('torch.nn.functional.interpolate');
         this.registerFunction('torch.nn.functional.leaky_relu');
         this.registerFunction('torch.nn.functional.l1_loss');
@@ -9720,14 +10342,14 @@ python.Execution = class {
         this.registerType('torch._higher_order_ops.wrap.WrapWithSetGradEnabled', class extends torch._ops.HigherOrderOperator {
             constructor(name) {
                 super(name, false);
-                this._schema = torch.FunctionSchema.parse('higher_order::wrap_with_set_grad_enabled(bool enable_grad, Any wrapped_func) -> Tensor');
+                this._schema = torch.FunctionSchema.parse('higher_order::wrap_with_set_grad_enabled(bool enable_grad, Any wrapped_func, ...) -> Tensor');
             }
         });
         torch.ops.higher_order.wrap_with_set_grad_enabled = new torch._higher_order_ops.wrap.WrapWithSetGradEnabled('wrap_with_set_grad_enabled');
         this.registerType('torch._higher_order_ops.wrap.Wrap', class extends torch._ops.HigherOrderOperator {
             constructor(name) {
                 super(name, false);
-                this._schema = torch.FunctionSchema.parse('higher_order::wrap(Any func) -> Tensor');
+                this._schema = torch.FunctionSchema.parse('higher_order::wrap(Any func, ...) -> Tensor');
             }
         });
         torch.ops.higher_order.wrap = new torch._higher_order_ops.wrap.Wrap('wrap');
@@ -10043,7 +10665,7 @@ python.Execution = class {
         this.registerFunction('torch._C.standardizeVectorForUnion', (...args) => {
             if (args.length === 1) {
                 const [to_flatten] = args;
-                torch._C.TORCH_INTERNAL_ASSERT(to_flatten !== null);
+                torch._C.TORCH_INTERNAL_ASSERT(to_flatten !== null, `'standardizeVectorForUnion' was passed a 'nullptr'.`);
                 const to_fill = [];
                 torch._C.standardizeVectorForUnion(to_flatten, to_fill);
                 to_flatten.splice(0, to_flatten.length);
@@ -10124,7 +10746,7 @@ python.Execution = class {
         this.registerType('torch.UnionType', class extends torch.Type {
             constructor(reference, kind) {
                 super(kind || 'UnionType');
-                torch._C.TORCH_INTERNAL_ASSERT(reference.length > 0);
+                torch._C.TORCH_INTERNAL_ASSERT(reference.length > 0, 'Cannot create an empty union.');
                 this._types = [];
                 torch._C.standardizeVectorForUnion(reference, this._types);
                 if (this._types.length === 1) {
@@ -10418,12 +11040,15 @@ python.Execution = class {
                 return new torch.TupleType(elements, null, null);
             }
             static createNamed(qualified_name, field_names, field_types /*, field_defaults */) {
-                const args = [];
-                for (let i = 0; i < field_names.length; i++) {
-                    const arg = new torch.Argument(field_names[i], field_types[i], field_types[i]);
-                    args.push(arg);
+                let schema = null;
+                if (qualified_name) {
+                    const args = [];
+                    for (let i = 0; i < field_names.length; i++) {
+                        const arg = new torch.Argument(field_names[i], field_types[i], field_types[i]);
+                        args.push(arg);
+                    }
+                    schema = new torch.FunctionSchema(qualified_name, '', args, []);
                 }
-                const schema = new torch.FunctionSchema(qualified_name, '', args, []);
                 return new torch.TupleType(field_types, qualified_name, schema);
             }
             elements() {
@@ -10641,7 +11266,7 @@ python.Execution = class {
                 return this.kind() === rhs.kind();
             }
             isSubtypeOf(rhs) {
-                return this.kind() === 'NumberType' || super.isSubtypeOf(rhs);
+                return rhs.kind() === 'NumberType' || super.isSubtypeOf(rhs);
             }
             str() {
                 return 'complex';
@@ -11219,6 +11844,12 @@ python.Execution = class {
             elementType() {
                 return this.type;
             }
+            append(item) {
+                this.push(item);
+            }
+            extend(items) {
+                this.push(...items);
+            }
         });
         this.registerFunction('torch._C.builtin_cast_method_to_scalar_type', () => {
             return new Map();
@@ -11452,6 +12083,9 @@ python.Execution = class {
             __getattr__(key) {
                 key = key === 'default' ? '' : key;
                 const op_dk_tags = torch._C._get_operation_overload(this._qualified_op_name, key);
+                if (op_dk_tags === null) {
+                    throw new python.Error(`The underlying op of '${this._qualified_op_name}' has no overload name '${key}'.`);
+                }
                 const [op_, op_dk_, tags] = op_dk_tags;
                 const schema = torch._C._get_schema(this._qualified_op_name, key);
                 const overload = this._has_script_object_arg(schema) ?
@@ -12096,14 +12730,11 @@ python.Execution = class {
                 }
                 const op = this.maybeOperator();
                 if (!op) {
-                    torch._C.TORCH_INTERNAL_ASSERT(this._kind.startsWith('prim::'));
+                    torch._C.TORCH_INTERNAL_ASSERT(this._kind.startsWith('prim::'), `Only prim ops are allowed to not have a registered operator but '${this._kind}' doesn't have one either. We don't know if this op has side effects.`);
                     return false;
                 }
                 if (this._kind.startsWith('prim::') || this._kind.startsWith('aten::') || this._kind.startsWith('cuda::')) {
-                    torch._C.TORCH_INTERNAL_ASSERT(
-                        op.aliasAnalysisKind() === 'INTERNAL_SPECIAL_CASE' ||
-                        op.aliasAnalysisKind() === 'FROM_SCHEMA' ||
-                        op.aliasAnalysisKind() === 'CONSERVATIVE');
+                    torch._C.TORCH_INTERNAL_ASSERT(op.aliasAnalysisKind() === 'INTERNAL_SPECIAL_CASE' || op.aliasAnalysisKind() === 'FROM_SCHEMA' || op.aliasAnalysisKind() === 'CONSERVATIVE', `aten:: and prim:: ops should have AliasAnalysisKind::INTERNAL_SPECIAL_CASE, AliasAnalysisKind::FROM_SCHEMA or AliasAnalysisKind::CONSERVATIVE but '${this._kind}' has '${op.aliasAnalysisKind()}.`);
                 }
                 switch (op.aliasAnalysisKind()) {
                     case 'PURE_FUNCTION':
@@ -12115,7 +12746,7 @@ python.Execution = class {
                     default:
                         break;
                 }
-                torch._C.TORCH_INTERNAL_ASSERT(false);
+                torch._C.TORCH_INTERNAL_ASSERT(false, 'Unhandled AliasAnalysisKind case.');
                 return false;
             }
             inputs() {
@@ -12200,7 +12831,7 @@ python.Execution = class {
             insertAfter(n) {
                 torch._C.AT_ASSERT(!this.inBlockList() || n.inBlockList());
                 torch._C.AT_ASSERT(n.owningBlock());
-                torch._C.TORCH_INTERNAL_ASSERT(n.kind() !== 'prim::Return');
+                torch._C.TORCH_INTERNAL_ASSERT(n.kind() !== 'prim::Return', 'Attempting to insert a Node after the Return node or before the Param node.');
                 this._owning_block = n.owningBlock();
                 const next = n.next;
                 n.next = this;
@@ -12337,6 +12968,13 @@ python.Execution = class {
                 return this;
             }
             f(name) {
+                return this._values.get(name)[0];
+            }
+            c_(name, value) {
+                this._values.set(name, [value, 'c']);
+                return this;
+            }
+            c(name) {
                 return this._values.get(name)[0];
             }
             t_(name, value) {
@@ -12662,6 +13300,8 @@ python.Execution = class {
                     this.tag = 'Int';
                 } else if (typeof value === 'number') {
                     this.tag = 'Double';
+                } else if (value instanceof builtins.complex) {
+                    this.tag = 'ComplexDouble';
                 } else if (value instanceof torch._C.EnumHolder) {
                     this.tag = 'Enum';
                 } else {
@@ -12696,7 +13336,10 @@ python.Execution = class {
                 return this.value;
             }
             isComplexDouble() {
-                return this.tag === 'ComplexDouble';
+                return this.tag === 'ComplexDouble' || this.tag === 'Complex';
+            }
+            toComplexDouble() {
+                return this.value;
             }
             isInt() {
                 return this.tag === 'Int';
@@ -13413,9 +14056,7 @@ python.Execution = class {
                 let lines = null;
                 if (ivalues[0] === 'FORMAT_WITH_STRING_TABLE') {
                     this.deserializer = new torch._C.SourceRangeDeserializer(ivalues[1]);
-                    /* eslint-disable prefer-destructuring */
                     lines = ivalues[2];
-                    /* eslint-enable prefer-destructuring */
                 } else {
                     this.deserializer = new torch._C.SourceRangeDeserializer();
                     lines = ivalues;
@@ -13709,6 +14350,9 @@ python.Execution = class {
                         return storage_context.get_storage(key);
                     }
                     const storage = new storage_type(size);
+                    if (!storage._set_cdata) {
+                        throw new python.Error(`'${storage_type.__name__}._set_cdata' is not a function.`);
+                    }
                     const storage_ptr = read_record(key);
                     storage._set_cdata(storage_ptr);
                     if (storage_context) {
@@ -13955,7 +14599,10 @@ python.Execution = class {
             return field;
         });
         this.registerFunction('torch._C.meaningfulName', (name) => {
-            if (name.length === 0 && name[0] === '$') {
+            if (name.length === 0) {
+                return false;
+            }
+            if (name[0] === '$') {
                 return false;
             }
             if (name[0] !== '_') {
@@ -14128,7 +14775,7 @@ python.Execution = class {
             let named_tuple = null;
             if (field_names) {
                 const types = values.map((v) => v.type());
-                named_tuple = torch.TupleType.createNamed(null, field_names.value(), types);
+                named_tuple = torch.TupleType.createNamed(null, field_names, types);
             }
             return g.insertNode(g.createTuple(values, named_tuple)).output();
         });
@@ -14503,7 +15150,7 @@ python.Execution = class {
                 }
                 return result;
             });
-            const return_has_field_names = returns.every((r) => !r.name);
+            const return_has_field_names = returns.every((r) => r.name);
             let return_field_names = null;
             if (return_has_field_names) {
                 return_field_names = returns.map((r) => r.name);
@@ -14580,8 +15227,10 @@ python.Execution = class {
                 schemas.push(method.getSchema());
             }
             if (schemas.length === 0) {
-                const user_function_name = name;
-                throw new python.Error(`Unknown built-in function '${user_function_name}'.`);
+                const inputs = args.map((arg) => arg.value(graph));
+                const n = graph.insertNode(graph.create(name, inputs, 0)).setSourceRange(loc);
+                n.addOutput().setType(torch.TensorType.get());
+                return n.output();
             }
             const matched = torch._C.matchSchemas(schemas, loc, graph, args, kwargs, self);
             if (matched[0] < variants.length + upgrader_schemas.length) {
@@ -14871,7 +15520,7 @@ python.Execution = class {
                 return new torch._C.IValue(node.i('value'), 'Int');
             } else if (type.isSubtypeOf(torch.NumberType.get()) && node.kindOf('value') === 'f') {
                 return new torch._C.IValue(node.f('value'), 'Double');
-            } else if (type.isSubtypeOf(torch.NumberType.get()) && node.kindOf('value') === 'c') {
+            } else if (type.isSubtypeOf(torch.ComplexType.get()) && node.kindOf('value') === 'c') {
                 return new torch._C.IValue(node.c('value'), 'Complex');
             } else if (type instanceof torch.ListType && node.kindOf('value') === 'ival') {
                 let list = node.ival('value');
@@ -15462,6 +16111,9 @@ python.Execution = class {
                             const [, storage_type, key, , size] = saved_id;
                             if (!this.storage_context.has_storage(key)) {
                                 const storage = new storage_type(size);
+                                if (!storage._set_cdata) {
+                                    throw new python.Error(`'${storage_type.__name__}._set_cdata' is not a function.`);
+                                }
                                 const stream = this.zip_reader.get_record(`.data/${key}.storage`);
                                 const buffer = stream.peek();
                                 storage._set_cdata(buffer);
@@ -16527,7 +17179,7 @@ python.Execution = class {
                 if (val.node().kind() !== opSymbol) {
                     return val;
                 }
-                const maybe_out_stack = this.runNodeIfInputsAreConstant(val.node());
+                const maybe_out_stack = torch._C.runNodeIfInputsAreConstant(val.node());
                 if (!maybe_out_stack) {
                     return val;
                 }
@@ -16883,6 +17535,12 @@ python.Execution = class {
                     return this.emitListLiteral(tree, type_hint);
                 } else if (tree instanceof ast.UnaryOp && tree.op instanceof ast.USub && tree.operand instanceof ast.Name && tree.operand.id === 'inf') {
                     return this.emitConst(new ast.Constant(-Infinity, 'float'));
+                } else if (tree instanceof ast.UnaryOp && tree.op instanceof ast.USub && tree.operand instanceof ast.Constant) {
+                    const c = tree.operand;
+                    if (c.type === 'complex') {
+                        return this.emitConst(new ast.Constant(new builtins.complex(-c.value.real, -c.value.imag), 'complex'));
+                    }
+                    return this.emitConst(new ast.Constant(-c.value, c.type));
                 } else if (tree instanceof ast.UnaryOp && tree.op instanceof ast.USub) {
                     return this.emitUnaryOp(tree, '__neg__', 'aten::neg');
                 } else if (tree instanceof ast.BinOp) {
@@ -17163,7 +17821,7 @@ python.Execution = class {
                     if (decl_ret && decl_ret !== torch.NoneType.get()) {
                         throw new python.Error('Function was not annotated as having type None, but does not return along all paths.');
                     }
-                    const b = new torch._C.WithInsertPoint(block.nodes()[-1]);
+                    const b = new torch._C.WithInsertPoint(block.nodes().end());
                     // this.emitReturn(Return::create(def.range(), Expr(Compound::create(TK_NONE, def.range(), {}))));
                     b.dispose();
                     throw new python.Error("'torch._C.to_ir.handleMaybeNoReturn' not implemented.");
@@ -18568,6 +19226,7 @@ python.Execution = class {
             constructor(obj) {
                 this.arg = new torch._export.serde.schema.Argument(obj.arg);
                 this.name = obj.name;
+                this.kind = obj.kind === undefined ? null : obj.kind;
             }
         });
         this.registerType('torch._export.serde.schema.Argument', class extends torch._export.serde.union._Union {
@@ -18615,7 +19274,7 @@ python.Execution = class {
                         this.as_sym_float = new torch._export.serde.schema.SymFloatArgument(this.as_sym_float);
                         break;
                     case 'as_sym_floats':
-                        this.as_sym_floats = this.as_sym_float.map((item) => new torch._export.serde.schema.SymFloatArgument(item));
+                        this.as_sym_floats = this.as_sym_floats.map((item) => new torch._export.serde.schema.SymFloatArgument(item));
                         break;
                     case 'as_optional_tensors':
                         this.as_optional_tensors = this.as_optional_tensors.map((item) => new torch._export.serde.schema.OptionalTensorArgument(item));
@@ -19072,7 +19731,7 @@ python.Execution = class {
                     const serialized_constants = torch.export.pt2_archive._package._load_constants(f, model_name);
                     const serialized_example_inputs = f.get(`data/sample_inputs/${model_name}.pt`, 'zip');
                     const artifact = new torch._export.serde.serialize.SerializedArtifact(serialized_exported_program, serialized_state_dict, serialized_constants, serialized_example_inputs);
-                    const exported_program = torch._export.serde.serialize.deserialize(artifact, expected_opset_version);
+                    const exported_program = executorch.exir.serde.serialize.deserialize(artifact, expected_opset_version);
                     exported_programs.set(model_name, exported_program);
                 }
             }
@@ -19172,15 +19831,21 @@ python.Execution = class {
             }
             deserialize_graph_output(output) {
                 if (output.type === 'as_tensor') {
-                    return this.serialized_name_to_node.get(output.as_tensor.name);
+                    return this.serialized_name_to_node.__getitem__(output.as_tensor.name);
                 } else if (output.type === 'as_sym_int') {
-                    return this.serialized_name_to_node.get(output.as_sym_int.as_name);
+                    return this.serialized_name_to_node.__getitem__(output.as_sym_int.as_name);
                 } else if (output.type === 'as_sym_bool') {
-                    return this.serialized_name_to_node.get(output.as_sym_bool.as_name);
+                    return this.serialized_name_to_node.__getitem__(output.as_sym_bool.as_name);
+                } else if (output.type === 'as_sym_float') {
+                    return this.serialized_name_to_node.__getitem__(output.as_sym_float.as_name);
                 } else if (output.type === 'as_int') {
-                    return this.serialized_name_to_node.get(output.as_int.as_name);
+                    return output.as_int;
+                } else if (output.type === 'as_float') {
+                    return output.as_float;
+                } else if (output.type === 'as_bool') {
+                    return output.as_bool;
                 } else if (output.type === 'as_none') {
-                    return this.serialized_name_to_node.get(output.as_sym_bool.as_name);
+                    return null;
                 }
                 throw new python.Error(`Unsupported graph node ${output.type}.`);
             }
@@ -19230,10 +19895,9 @@ python.Execution = class {
                 if (serialized_graph.is_single_tensor_return) {
                     output_node.meta.set('val', output_node.args[0].meta.get('val'));
                 } else {
-                    /* output_node.meta['val'] = tuple(
-                        arg.meta['val'] if isinstance(arg, torch.fx.Node) else arg
-                        for arg in output_node.args[0]
-                    ) */
+                    output_node.meta.set('val', new builtins.tuple(Array.from(output_node.args[0]).map((arg) =>
+                        arg instanceof torch.fx.Node ? arg.meta.get('val') : arg
+                    )));
                 }
                 return self.graph;
             }
@@ -19473,9 +20137,18 @@ python.Execution = class {
             deserialize_inputs(target, serialized_node) {
                 const schema_args = this._get_schema_from_target(target).arguments;
                 const actual_args = new Map(serialized_node.inputs.map((input) => [input.name, this.deserialize_input(input.arg)]));
+                const argument_kinds = new Map(serialized_node.inputs.map((input) => [input.name, input.kind]));
                 const args = new builtins.list();
                 const kwargs = new builtins.dict();
                 for (const schema_arg of schema_args) {
+                    const kind = argument_kinds.get(schema_arg.name);
+                    if (kind === 1 /* ArgumentKind.POSITIONAL */) {
+                        args.push(actual_args.get(schema_arg.name));
+                        continue;
+                    } else if (kind === 2 /* ArgumentKind.KEYWORD */ && actual_args.has(schema_arg.name)) {
+                        kwargs.set(schema_arg.name, actual_args.get(schema_arg.name));
+                        continue;
+                    }
                     const is_positional = !schema_arg.has_default_value() && !schema_arg.kwarg_only;
                     if (is_positional) {
                         args.push(actual_args.get(schema_arg.name));
@@ -19511,7 +20184,6 @@ python.Execution = class {
                 } else if (typ_ === 'as_layout') {
                     return torch._export.serde.serialize._SERIALIZE_TO_TORCH_LAYOUT[inp.as_layout];
                 } else if (typ_ === 'as_graph') {
-                    // throw new python.Error('GraphArgument deserialization is not implemented.');
                     const context = this.save_graph_module();
                     context.__enter__();
                     this.deserialize_graph(value.graph);
@@ -19541,18 +20213,30 @@ python.Execution = class {
                     } else if (typ_ === 'as_tensors') {
                         const result = [];
                         for (const arg of value) {
+                            if (!this.serialized_name_to_node.has(arg.name)) {
+                                throw new python.Error(`Unknown tensor '${arg.name}'.`);
+                            }
                             result.push(this.serialized_name_to_node.get(arg.name));
                         }
                         return result;
                     } else if (typ_ === 'as_ints' || typ_ === 'as_floats' || typ_ === 'as_bools' || typ_ ===  'as_strings') {
                         return Array.from(value);
-                    } else if (typ_ === 'as_sym_ints' || typ_ === 'as_sym_bools') {
+                    } else if (typ_ === 'as_int_lists') {
+                        return value.map((dims) => Array.from(dims));
+                    } else if (typ_ === 'as_float_lists') {
+                        return value.map((floats) => Array.from(floats));
+                    } else if (typ_ === 'as_nested_tensors') {
+                        return value.map((inner_list) => inner_list.map((arg) => this.serialized_name_to_node.get(arg.name)));
+                    } else if (typ_ === 'as_sym_ints' || typ_ === 'as_sym_bools' || typ_ === 'as_sym_floats') {
                         return value.map((arg) => this.deserialize_sym_argument(arg));
                     } else if (typ_ === 'as_optional_tensors') {
                         const deserialize_optional_tensor_args = (a) => {
                             if (a.type === 'as_none') {
                                 return null;
                             } else if (a.type === 'as_tensor') {
+                                if (!this.serialized_name_to_node.has(a.value.name)) {
+                                    throw new python.Error(`Unknown tensor '${a.value.name}'.`);
+                                }
                                 return this.serialized_name_to_node.get(a.value.name);
                             }
                             throw new python.Error(`Unsupported argument '${typ_}'.`);
@@ -19619,6 +20303,8 @@ python.Execution = class {
                         name = arg.name;
                     } else if (arg instanceof torch._export.serde.schema.SymIntArgument) {
                         name = arg.as_name;
+                    } else if (arg instanceof torch._export.serde.schema.SymFloatArgument) {
+                        name = arg.as_name;
                     } else {
                         throw new python.Error(`Unsupported argument type '${arg}'.`);
                     }
@@ -19635,32 +20321,56 @@ python.Execution = class {
                 };
                 const generate_getitems = (meta_val, fx_node, args) => {
                     for (let idx = 0; idx < args.length; idx++) {
-                        let arg = args[idx];
-                        if (arg instanceof torch._export.serde.schema.Argument) {
-                            arg = arg.value;
-                        }
-                        if (arg instanceof torch._export.serde.schema.TensorArgument || arg instanceof torch._export.serde.schema.SymIntArgument) {
+                        const arg = args[idx];
+                        if (arg instanceof torch._export.serde.schema.TensorArgument ||
+                            arg instanceof torch._export.serde.schema.SymIntArgument ||
+                            arg instanceof torch._export.serde.schema.SymFloatArgument) {
                             generate_getitem(meta_val, fx_node, arg, idx);
-                        } else if (Array.isArray(arg)) { // arg instanceof (list, tuple))
+                        } else if (arg instanceof torch._export.serde.schema.Argument) {
+                            if (arg.type === 'as_tensor' || arg.type === 'as_sym_int' || arg.type === 'as_sym_float') {
+                                generate_getitem(meta_val, fx_node, arg.value, idx);
+                            } else if (arg.type === 'as_none') {
+                                const individual_output = this.graph.create_node(
+                                    'call_function',
+                                    operator.getitem,
+                                    new builtins.tuple([fx_node, idx]),
+                                    null,
+                                    'as_none',
+                                );
+                                meta_val.push(null);
+                                individual_output.meta.set('val', null);
+                                individual_output.meta.update(deserialized_metadata);
+                            } else if (Array.isArray(arg.value)) {
+                                const list_output = this.graph.create_node(
+                                    'call_function',
+                                    operator.getitem,
+                                    new builtins.tuple([fx_node, idx]),
+                                );
+                                meta_val.push([]);
+                                generate_getitems(meta_val[meta_val.length - 1], list_output, arg.value);
+                                list_output.meta.update(deserialized_metadata);
+                                list_output.meta.set('val', meta_val[meta_val.length - 1]);
+                            } else {
+                                throw new python.Error(`Unsupported node output type '${arg.type}'.`);
+                            }
+                        } else if (Array.isArray(arg)) {
                             const list_output = this.graph.create_node(
                                 'call_function',
                                 operator.getitem,
-                                (fx_node, idx),
+                                new builtins.tuple([fx_node, idx]),
                             );
-                            meta_val.append([]);
-                            generate_getitems(meta_val[-1], list_output, arg);
+                            meta_val.push([]);
+                            generate_getitems(meta_val[meta_val.length - 1], list_output, arg);
                             list_output.meta.update(deserialized_metadata);
-                            list_output.meta.set('val', meta_val[-1]);
+                            list_output.meta.set('val', meta_val[meta_val.length - 1]);
                         } else {
-                            throw new python.Error(`Unsupported node output type: '${arg}'.`);
+                            throw new python.Error(`Unsupported node output type '${arg}'.`);
                         }
                     }
                 };
                 const meta_val = [];
                 if (serialized_node.outputs.length === 1) {
-                    // assert isinstance(serialized_node.outputs[0].value, list)
-                    // assert isinstance(serialized_node.outputs[0].value[0], TensorArgument)
-                    generate_getitems(meta_val, fx_node, serialized_node.outputs[0].as_tensors);
+                    generate_getitems(meta_val, fx_node, serialized_node.outputs[0].value);
                 } else {
                     generate_getitems(meta_val, fx_node, serialized_node.outputs);
                 }
@@ -19833,6 +20543,153 @@ python.Execution = class {
                 return returns.length === 1 && returns[0].real_type instanceof torch.TensorType;
             }
         });
+        this.registerType('executorch.exir.dialects.edge._ops.EdgeOpOverload', class {
+            constructor(op, schema) {
+                this._op = op;
+                this._schema = schema || op._schema;
+                this.__name__ = `${op._schema.name.split('::')[1]}.${op._overloadname}`;
+            }
+            name() {
+                return `executorch.exir.dialects.edge.ops.${this._op.name()}`;
+            }
+        });
+        this.registerType('executorch.exir.dialects.backend._ops.BackendOpOverload', class {
+            constructor(op, schema) {
+                this._op = op;
+                this._schema = schema || op._schema;
+                this.__name__ = `${op._schema.name.split('::')[1]}.${op._overloadname}`;
+            }
+            name() {
+                return `executorch.exir.dialects.backend.ops.${this._op.name()}`;
+            }
+        });
+        this.registerType('executorch.exir.dialects.edge._ops.EdgeOpOverloadPacket', class {
+            constructor(qualified_op_name, op_name, parent_overload_packet) {
+                this._parent_overload_packet = parent_overload_packet;
+                this._qualified_op_name = qualified_op_name;
+                this.__name__ = qualified_op_name.replace('::', '.');
+            }
+            __getattr__(key) {
+                const parent_overload = builtins.getattr(this._parent_overload_packet, key);
+                if (!parent_overload) {
+                    throw new python.Error(`The underlying op of '${this}' has no overload name '${key}'.`);
+                }
+                const overload = new executorch.exir.dialects.edge._ops.EdgeOpOverload(parent_overload);
+                this[key] = overload;
+                return overload;
+            }
+        });
+        this.registerType('executorch.exir.dialects.backend._ops.BackendOpOverloadPacket', class {
+            constructor(qualified_op_name, op_name, parent_overload_packet) {
+                this._parent_overload_packet = parent_overload_packet;
+                this._qualified_op_name = qualified_op_name;
+                this.__name__ = qualified_op_name.replace('::', '.');
+            }
+            __getattr__(key) {
+                const parent_overload = builtins.getattr(this._parent_overload_packet, key);
+                if (!parent_overload) {
+                    throw new python.Error(`The underlying op of '${this}' has no overload name '${key}'.`);
+                }
+                const overload = new executorch.exir.dialects.backend._ops.BackendOpOverload(parent_overload);
+                this[key] = overload;
+                return overload;
+            }
+        });
+        this.registerType('executorch.exir.dialects._ops._OpNamespace', class {
+            constructor(dialect, name) {
+                this._dialect = dialect;
+                this._name = name;
+                this._op_namespace = torch.ops[name];
+            }
+            __getattr__(op_name) {
+                const parent_packet = builtins.getattr(this._op_namespace, op_name);
+                const qualified_op_name = `${this._name}::${op_name}`;
+                const PacketCls = this._dialect === 'edge' ?
+                    executorch.exir.dialects.edge._ops.EdgeOpOverloadPacket :
+                    executorch.exir.dialects.backend._ops.BackendOpOverloadPacket;
+                const opoverloadpacket = new PacketCls(qualified_op_name, op_name, parent_packet);
+                this[op_name] = opoverloadpacket;
+                return opoverloadpacket;
+            }
+        });
+        this.registerType('executorch.exir.dialects._ops._DialectNamespace', class {
+            constructor(dialect_name) {
+                this._dialect_name = dialect_name;
+            }
+            __getattr__(name) {
+                const namespace = new executorch.exir.dialects._ops._OpNamespace(this._dialect_name, name);
+                this[name] = namespace;
+                return namespace;
+            }
+        });
+        this.registerType('executorch.exir.dialects._ops._Ops', class {
+            __getattr__(name) {
+                const dialect = new executorch.exir.dialects._ops._DialectNamespace(name);
+                this[name] = dialect;
+                return dialect;
+            }
+        });
+        executorch.exir.dialects._ops.ops = new executorch.exir.dialects._ops._Ops();
+        this.registerType('executorch.exir.serde.serialize.GraphModuleDeserializer', class extends torch._export.serde.serialize.GraphModuleDeserializer {
+            deserialize_operator(serialized_target) {
+                const find_operator = (module, target) => {
+                    const names = target.split('.').slice(5);
+                    let node = module;
+                    for (const name of names) {
+                        node = builtins.getattr(node, name);
+                        if (!node) {
+                            return target;
+                        }
+                    }
+                    return node;
+                };
+                const ops = executorch.exir.dialects._ops.ops;
+                if (serialized_target.startsWith('executorch.exir.dialects.edge.ops')) {
+                    return find_operator(builtins.getattr(ops, 'edge'), serialized_target);
+                }
+                if (serialized_target.startsWith('executorch.exir.dialects.backend.ops')) {
+                    return find_operator(builtins.getattr(ops, 'backend'), serialized_target);
+                }
+                return super.deserialize_operator(serialized_target);
+            }
+            deserialize_node(serialized_node, target) {
+                if (builtins.isinstance(target, executorch.exir.dialects.edge._ops.EdgeOpOverload)) {
+                    const name = this._is_single_tensor_return(target._op) ? serialized_node.outputs[0].as_tensor.name : null;
+                    const [args, kwargs] = this.deserialize_inputs(target._op, serialized_node);
+                    const fx_node = this.graph.create_node('call_function', target, args, kwargs, name);
+                    this.deserialize_outputs(serialized_node, fx_node);
+                    fx_node.meta.update(this.deserialize_metadata(serialized_node.metadata));
+                    return;
+                }
+                super.deserialize_node(serialized_node, target);
+            }
+            deserialize_outputs(serialized_node, fx_node) {
+                if (builtins.isinstance(fx_node.target, executorch.exir.dialects.edge._ops.EdgeOpOverload)) {
+                    const edge_op = fx_node.target;
+                    fx_node.target = edge_op._op;
+                    super.deserialize_outputs(serialized_node, fx_node);
+                    fx_node.target = edge_op;
+                    return;
+                }
+                super.deserialize_outputs(serialized_node, fx_node);
+            }
+        });
+        this.registerType('executorch.exir.serde.serialize.ExportedProgramDeserializer', class extends torch._export.serde.serialize.ExportedProgramDeserializer {
+            deserialize(exported_program, state_dict, constants, example_inputs) {
+                const symbol_name_to_range = new Map(Object.entries(exported_program.range_constraints));
+                const deserializer = new executorch.exir.serde.serialize.GraphModuleDeserializer();
+                const res = deserializer.deserialize(
+                    exported_program.graph_module, state_dict, constants, example_inputs, symbol_name_to_range);
+                return new torch.export.exported_program.ExportedProgram(
+                    res.graph_module, res.graph_module.graph, res.signature,
+                    res.state_dict, null, res.module_call_graph, res.example_inputs,
+                    null, res.constants);
+            }
+        });
+        this.registerFunction('executorch.exir.serde.serialize.deserialize', (artifact, expected_opset_version) => {
+            const serialized_exported_program = torch._export.serde.serialize._dict_to_dataclass(torch._export.serde.schema.ExportedProgram, artifact.exported_program);
+            return new executorch.exir.serde.serialize.ExportedProgramDeserializer(expected_opset_version).deserialize(serialized_exported_program, artifact.state_dict, artifact.constants, artifact.example_inputs);
+        });
         this.registerType('torch._export.verifier.Verifier', class {});
         this.registerType('torch._dynamo.convert_frame.CatchErrorsWrapper', class {});
         this.registerType('torch._dynamo.convert_frame.ConvertFrameAssert', class {});
@@ -19955,6 +20812,7 @@ python.Execution = class {
                 this.hooks_dict_ref = this.hooks_dict_ref || new Map();
             }
         });
+        this.registerType('torch.utils.tensorboard.writer.SummaryWriter', class {});
         this.registerType('torch.storage._StorageBase', class {
             constructor(size, dtype) {
                 this._size = size;
@@ -20006,6 +20864,12 @@ python.Execution = class {
         this.registerType('torch.storage.UntypedStorage', class {
             constructor(size) {
                 this._size = size;
+            }
+            size() {
+                return this._size;
+            }
+            get data() {
+                return this._cdata;
             }
             _set_cdata(data) {
                 if (this._size !== data.length) {
@@ -20079,128 +20943,128 @@ python.Execution = class {
         });
         this.registerType('torch.BoolStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.BoolStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.ByteStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.ByteStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.CharStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.CharStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.ShortStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.ShortStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.IntStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.IntStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.LongStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.LongStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.HalfStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.HalfStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.FloatStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.FloatStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.DoubleStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.DoubleStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.ComplexHalfStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.ComplexHalfStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.ComplexFloatStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.ComplexFloatStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.ComplexDoubleStorage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.ComplexDoubleStorage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.QInt8Storage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.QUInt8Storage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.QUInt8Storage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.QUInt8Storage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.QInt32Storage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.QInt32Storage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.BFloat16Storage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.BFloat16Storage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.QUInt4x2Storage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.QUInt4x2Storage.dtype);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.QUInt2x4Storage', class extends torch.storage._LegacyStorage {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.QUInt2x4Storage.dtype);
-                /* eslint-enable no-constructor-return */
+            }
+        });
+        this.registerType('torch.UInt16Storage', class extends torch.storage._LegacyStorage {
+            constructor(...args) {
+                // eslint-disable-next-line
+                return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.UInt16Storage.dtype);
+            }
+        });
+        this.registerType('torch.UInt32Storage', class extends torch.storage._LegacyStorage {
+            constructor(...args) {
+                // eslint-disable-next-line no-constructor-return
+                return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.UInt32Storage.dtype);
+            }
+        });
+        this.registerType('torch.UInt64Storage', class extends torch.storage._LegacyStorage {
+            constructor(...args) {
+                // eslint-disable-next-line no-constructor-return
+                return new torch.storage.TypedStorage(args.length > 0 ? args[0] : 0, torch.UInt64Storage.dtype);
             }
         });
         this.registerType('torch.Size', class extends Array {
@@ -20237,6 +21101,18 @@ python.Execution = class {
                 if (requires_grad !== undefined) {
                     this.requires_grad = requires_grad;
                 }
+            }
+            clone() {
+                const tensor = new torch.Tensor(this._storage, this._shape, this._dtype, this._layout, this._device, this.requires_grad);
+                tensor._storage_offset = this._storage_offset;
+                tensor._stride = this._stride;
+                tensor._values = this._values;
+                tensor._indices = this._indices;
+                tensor.__quantized__ = this.__quantized__;
+                tensor.__nested__ = this.__nested__;
+                tensor.data = this.data;
+                tensor._backward_hooks = this._backward_hooks;
+                return tensor;
             }
             get device() {
                 if (this._device !== undefined) {
@@ -20341,6 +21217,33 @@ python.Execution = class {
                 }
                 return NaN;
             }
+            tolist() {
+                const storage = this.storage();
+                const dtype = storage.dtype.__reduce__();
+                const itemsize = storage.dtype.itemsize();
+                const offset = (this._storage_offset || 0) * itemsize;
+                const data = storage.data.peek ? storage.data.peek() : storage.data;
+                const view = new DataView(data.buffer, data.byteOffset + offset, data.byteLength - offset);
+                const size = this._shape.reduce((a, b) => a * b, 1);
+                const list = new Array(size);
+                switch (dtype) {
+                    case 'int16':
+                        for (let i = 0; i < size; i++) {
+                            list[i] = view.getInt16(i * 2, true);
+                        }
+                        return list;
+                    case 'int64':
+                        for (let i = 0; i < size; i++) {
+                            list[i] = view.getInt32(i * 8, true);
+                            if (view.getUint32(i * 8 + 4, true) !== 0) {
+                                throw new python.Error('Signed 64-bit value exceeds 32-bit range.');
+                            }
+                        }
+                        return list;
+                    default:
+                        throw new python.Error(`Unsupported tolist dtype '${dtype}'.`);
+                }
+            }
             __str__() {
                 return 'tensor(...)';
             }
@@ -20402,132 +21305,114 @@ python.Execution = class {
         this.registerType('torch.nn.parameter.UninitializedBuffer', class extends torch.Tensor {});
         this.registerType('torch.BoolTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.ByteTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.CharTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.ShortTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.IntTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.LongTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.HalfTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.FloatTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.DoubleTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.ComplexFloatTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.ComplexDoubleTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.QInt8Tensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.QUInt8Tensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.QInt32Tensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.BFloat16Tensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.cuda._CudaLegacyStorage', class extends torch.storage._LegacyStorage {});
         this.registerType('torch.cuda.FloatStorage', class extends torch.cuda._CudaLegacyStorage {});
         this.registerType('torch.cuda.FloatTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.cuda.DoubleStorage', class extends torch.cuda._CudaLegacyStorage {});
         this.registerType('torch.cuda.DoubleTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torch.cuda.amp.grad_scaler.GradScaler', class {});
         this.registerType('torchao.utils.TorchAOBaseTensor', class extends torch.Tensor {
             constructor(...args) {
-                /* eslint-disable no-constructor-return */
+                // eslint-disable-next-line no-constructor-return
                 return new torch.Tensor(...args);
-                /* eslint-enable no-constructor-return */
             }
         });
         this.registerType('torchao.dtypes.affine_quantized_tensor.AffineQuantizedTensor', class extends torchao.utils.TorchAOBaseTensor {});
@@ -20537,7 +21422,20 @@ python.Execution = class {
         this.registerType('torchao.dtypes.utils.AQTTensorImpl', class extends torchao.utils.TorchAOBaseTensor {});
         this.registerType('torchao.dtypes.utils.PlainLayout', class extends torchao.dtypes.utils.Layout {});
         this.registerType('torchao.dtypes.floatx.float8_layout.Float8AQTTensorImpl', class extends torchao.dtypes.utils.AQTTensorImpl {});
+        this.registerType('torchao.quantization.linear_activation_quantized_tensor.LinearActivationQuantizedTensor', class extends torchao.utils.TorchAOBaseTensor {});
+        this.registerType('torchao.quantization.quant_api._int8_asymm_per_token_quant', class {});
+        this.registerFunction('torchao.quantization.quant_api._int8_symm_per_token_reduced_range_quant');
         this.registerType('torchao.quantization.quant_primitives.ZeroPointDomain', class extends this.enum.Enum {});
+        this.registerType('torchao.prototype.mx_formats.mx_tensor.MXTensor', class extends torchao.utils.TorchAOBaseTensor {});
+        torchao.prototype.mx_formats.mx_tensor.MXTensor.tensor_attribute_names = ['_elem_dtype', 'block_size'];
+        torchao.prototype.mx_formats.mx_tensor.MXTensor.tensor_data_names = ['qdata', 'scale'];
+        this.registerType('torchao.prototype.mx_formats.mx_tensor.QuantizeTensorToMXKwargs', class {});
+        this.registerType('torchao.prototype.mx_formats.config.ScaleCalculationMode', class extends this.enum.Enum {});
+        this.registerType('torchao.quantization.Float8Tensor', class extends torchao.utils.TorchAOBaseTensor {});
+        this.registerType('torchao.quantization.granularity.PerTensor', class {});
+        this.registerType('torchao.quantization.IntxUnpackedToInt8Tensor', class extends torchao.utils.TorchAOBaseTensor {});
+        this.registerType('torchao.quantization.quantize_.common.kernel_preference.KernelPreference', class extends this.enum.Enum {});
+        this.registerType('torchao.float8.inference.Float8MMConfig', class {});
         this.registerFunction('torch.cuda.amp.grad_scaler._refresh_per_optimizer_state');
         this.registerType('torch.SymBool', class {
             constructor(node) {
@@ -20566,9 +21464,9 @@ python.Execution = class {
         torch.float16 = torch.HalfStorage.dtype = new torch.dtype(5, 'float16', 2);
         torch.float32 = torch.FloatStorage.dtype = new torch.dtype(6, 'float32', 4);
         torch.float64 = torch.DoubleStorage.dtype = new torch.dtype(7, 'float64', 8);
-        torch.complex32 = torch.ComplexHalfStorage.dtype = new torch.dtype(8, 'complex32', 4);
-        torch.complex64 = torch.ComplexFloatStorage.dtype = new torch.dtype(9, 'complex64', 8);
-        torch.complex128 = torch.ComplexDoubleStorage.dtype = new torch.dtype(10, 'complex128', 16);
+        torch.complex32 = torch.ComplexHalfStorage.dtype = new torch.dtype(8, 'complex<float16>', 4);
+        torch.complex64 = torch.ComplexFloatStorage.dtype = new torch.dtype(9, 'complex<float32>', 8);
+        torch.complex128 = torch.ComplexDoubleStorage.dtype = new torch.dtype(10, 'complex<float64>', 16);
         torch.bool = torch.BoolStorage.dtype = new torch.dtype(11, 'boolean', 1);
         torch.qint8 = torch.QInt8Storage.dtype = new torch.dtype(12, 'qint8', 1);
         torch.quint8 = torch.QUInt8Storage.dtype = new torch.dtype(13, 'quint8', 1);
@@ -20585,9 +21483,15 @@ python.Execution = class {
         torch.float8_e5m2fnuz = new torch.dtype(24, 'float8_e5m2fnuz', 1);
         torch.float8_e4m3fn = new torch.dtype(25, 'float8_e4m3fn', 1);
         torch.float8_e4m3fnuz = new torch.dtype(26, 'float8_e4m3fnuz', 1);
-        torch.uint16 = new torch.dtype(27, 'uint16', 2);
-        torch.uint32 = new torch.dtype(28, 'uint32', 4);
-        torch.uint64 = new torch.dtype(29, 'uint64', 8);
+        torch.float8_e8m0fnu = new torch.dtype(44, 'float8_e8m0fnu', 1);
+        torch.float4_e2m1fn_x2 = new torch.dtype(45, 'float4_e2m1fn_x2', 1);
+        torch.int1 = new torch.dtype(37, 'int1');
+        torch.int2 = new torch.dtype(38, 'int2');
+        torch.int3 = new torch.dtype(39, 'int3');
+        torch.int4 = new torch.dtype(40, 'int4');
+        torch.uint16 = torch.UInt16Storage.dtype = new torch.dtype(27, 'uint16', 2);
+        torch.uint32 = torch.UInt32Storage.dtype = new torch.dtype(28, 'uint32', 4);
+        torch.uint64 = torch.UInt64Storage.dtype = new torch.dtype(29, 'uint64', 8);
         torch._export.serde.serialize._SERIALIZE_TO_TORCH_DTYPE = new Map([
             ['uint8', 'BYTE'],
             ['int8', 'CHAR'], ['int16', 'SHORT'], ['int32', 'INT'], ['int64', 'LONG'],
@@ -20766,11 +21670,13 @@ python.Execution = class {
         this.registerType('fastai.vision.augment.RandTransform', class extends fastcore.transform.DisplayedTransform {});
         this.registerType('fastai.vision.augment.AffineCoordTfm', class extends fastai.vision.augment.RandTransform {});
         this.registerType('fastai.vision.augment.Brightness', class {});
+        this.registerType('fastai.vision.augment.Contrast', class {});
         this.registerType('fastai.vision.augment.flip_mat', class {});
         this.registerType('fastai.vision.augment.Flip', class {});
         this.registerType('fastai.vision.augment.RandomResizedCrop', class {});
         this.registerType('fastai.vision.augment.RandomResizedCropGPU', class {});
         this.registerType('fastai.vision.augment.Resize', class {});
+        this.registerType('fastai.vision.augment.SpaceTfm', class {});
         this.registerType('fastai.vision.augment.rotate_mat', class {});
         this.registerFunction('fastai.vision.augment.TensorImage.lighting');
         this.registerType('fastai.vision.augment.Warp', class extends fastai.vision.augment.AffineCoordTfm {});
@@ -20854,6 +21760,9 @@ python.Execution = class {
             const module = this._registry.get(name) || new this.builtins.module(name);
             module.__package__ = name;
             this._modules.set(name, module);
+            if (parent && this._registry.has(parent)) {
+                this._registry.set(name, module);
+            }
             const path = name.split('.').join('/');
             module.__path__ = [path];
             const file = `${path}.py`;
@@ -20946,9 +21855,21 @@ python.Execution = class {
         const module = this.import(moduleName);
         let type = module ? module[memberName] : null;
         if (!type) {
+            const index = name.indexOf('.');
+            const rootName = index === -1 ? '' : name.substring(0, index);
+            if (rootName) {
+                const root = this.import(rootName);
+                if (root && root.__materialize__) {
+                    root.__materialize__(name);
+                    const module = this.import(moduleName);
+                    type = module ? module[memberName] : null;
+                }
+            }
+        }
+        if (!type) {
             if (!this._unresolved.has(name)) {
                 const moduleName = name.split('.').shift();
-                if (this._registry.has(moduleName) && moduleName !== '__main__') {
+                if (this._registry.has(moduleName) && moduleName !== '__main__' && moduleName !== '__torch__') {
                     this.emit('resolve', name);
                 }
                 const type = this._createType(name, class {});

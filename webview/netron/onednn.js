@@ -199,22 +199,22 @@ onednn.Node = class {
 
 onednn.Argument = class {
 
-    constructor(name, value, type) {
+    constructor(name, value, type = null) {
         this.name = name;
         this.value = value;
-        this.type = type || null;
+        this.type = type;
     }
 };
 
 onednn.Value = class {
 
-    constructor(name, type, initializer) {
+    constructor(name, type = null, initializer = null) {
         if (typeof name !== 'string') {
             throw new onednn.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
         this.name = name;
-        this.type = type || null;
-        this.initializer = initializer || null;
+        this.type = type;
+        this.initializer = initializer;
     }
 };
 
@@ -229,6 +229,7 @@ onednn.TensorType = class {
             case 's4': this.dataType = 'int4'; break;
             case 's8': this.dataType = 'int8'; break;
             case 's32': this.dataType = 'int32'; break;
+            case 's64': this.dataType = 'int64'; break;
             case 'u4': this.dataType = 'uint4'; break;
             case 'u8': this.dataType = 'uint8'; break;
             case 'bf16': this.dataType = 'bfloat16'; break;

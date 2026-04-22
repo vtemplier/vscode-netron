@@ -574,15 +574,15 @@
         "name": "gamma_constraint"
       },
       {
-        "description": "Whether to use [Batch Renormalization](\n    https://arxiv.org/abs/1702.03275). This adds extra variables during\n      training. The inference is the same for either value of this parameter.",
+        "description": "Whether to use\n        [Batch Renormalization](https://arxiv.org/abs/1702.03275). This\n        adds extra variables during training. The inference is the same\n        for either value of this parameter.",
         "name": "renorm"
       },
       {
-        "description": "A dictionary that may map keys 'rmax', 'rmin', 'dmax' to\n    scalar `Tensors` used to clip the renorm correction. The correction `(r,\n    d)` is used as `corrected_value = normalized_value * r + d`, with `r`\n    clipped to [rmin, rmax], and `d` to [-dmax, dmax]. Missing rmax, rmin,\n    dmax are set to inf, 0, inf, respectively.",
+        "description": "Dictionary, valid only if `renorm = True`.\n        Maps optional keys `\"rmax\"`, `\"rmin\"`, `\"dmax\"` to floats used to\n        clip the renorm correction. The correction `(r, d)` is used as\n        `corrected_value = normalized_value * r + d`, with `r` clipped to\n        `[rmin, rmax]`, and `d` to `[-dmax, dmax]`. Missing `rmax`, `rmin`,\n        `dmax` are set to `inf`, `0`, `inf`, respectively.",
         "name": "renorm_clipping"
       },
       {
-        "description": "Momentum used to update the moving means and standard\n    deviations with renorm. Unlike `momentum`, this affects training and\n    should be neither too small (which would add noise) nor too large (which\n    would give stale estimates). Note that `momentum` is still applied to get\n    the means and variances for inference.",
+        "description": "Momentum used to update the moving means and standard\n        deviations with renorm. Valid only if `renorm= True`. Unlike\n        `momentum`, this affects training and should be neither too small\n        (which would add noise) nor too large (which would give stale\n        estimates). Note that `momentum` is still applied to get the means\n        and variances for inference.",
         "name": "renorm_momentum"
       },
       {
@@ -1713,7 +1713,7 @@
     "name": "Dense",
     "module": "keras.layers",
     "category": "Layer",
-    "description": "Just your regular densely-connected NN layer.\n\n`Dense` implements the operation:\n`output = activation(dot(input, kernel) + bias)`\nwhere `activation` is the element-wise activation function\npassed as the `activation` argument, `kernel` is a weights matrix\ncreated by the layer, and `bias` is a bias vector created by the layer\n(only applicable if `use_bias` is `True`).\n\nNote: If the input to the layer has a rank greater than 2, `Dense`\ncomputes the dot product between the `inputs` and the `kernel` along the\nlast axis of the `inputs` and axis 0 of the `kernel` (using `tf.tensordot`).\nFor example, if input has dimensions `(batch_size, d0, d1)`, then we create\na `kernel` with shape `(d1, units)`, and the `kernel` operates along axis 2\nof the `input`, on every sub-tensor of shape `(1, 1, d1)` (there are\n`batch_size * d0` such sub-tensors). The output in this case will have\nshape `(batch_size, d0, units)`.",
+    "description": "Just your regular densely-connected NN layer.\n\n`Dense` implements the operation:\n`output = activation(dot(input, kernel) + bias)`\nwhere `activation` is the element-wise activation function\npassed as the `activation` argument, `kernel` is a weights matrix\ncreated by the layer, and `bias` is a bias vector created by the layer\n(only applicable if `use_bias` is `True`). When this layer is\nfollowed by a `BatchNormalization` layer, it is recommended to set\n`use_bias=False` as `BatchNormalization` has its own bias term.\n\nNote: If the input to the layer has a rank greater than 2, `Dense`\ncomputes the dot product between the `inputs` and the `kernel` along the\nlast axis of the `inputs` and axis 0 of the `kernel` (using `tf.tensordot`).\nFor example, if input has dimensions `(batch_size, d0, d1)`, then we create\na `kernel` with shape `(d1, units)`, and the `kernel` operates along axis 2\nof the `input`, on every sub-tensor of shape `(1, 1, d1)` (there are\n`batch_size * d0` such sub-tensors). The output in this case will have\nshape `(batch_size, d0, units)`.",
     "attributes": [
       {
         "description": "Positive integer, dimensionality of the output space.",
@@ -3439,6 +3439,10 @@
       {
         "name": "flash_attention",
         "description": "If `None`, the layer attempts to use flash\n        attention for faster and more memory-efficient attention\n        computations when possible. This behavior can be configured using\n        `keras.config.enable_flash_attention()` or\n        `keras.config.disable_flash_attention()`."
+      },
+      {
+        "name": "use_gate",
+        "description": "Boolean, whether to apply a gated attention mechanism.\n        When True, an additional gating branch is added based on the\n        (Gated Attention for Large Language Models)[https://arxiv.org/abs/2505.06708].\n        It applies a sigmoid-activated linear projection to the query\n        which then gates the attention output. This helps improve training\n        stability and eliminates \"attention sinks\"."
       }
     ],
     "examples": [

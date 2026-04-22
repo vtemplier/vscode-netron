@@ -45,7 +45,7 @@ hdf5.File = class {
                     reader.skip(4);
                     if (version > 0) {
                         this._indexedStorageInternalNodeK = reader.uint16();
-                        this.skip(2); // Reserved
+                        reader.skip(2); // Reserved
                     }
                     this._baseAddress = reader.offset();
                     reader.offset(); // Address of File Free space Info
@@ -210,7 +210,7 @@ hdf5.Variable = class {
         if (data) {
             const reader = hdf5.Reader.open(data);
             const array = this._dataspace.read(this._datatype, reader);
-            return this._dataspace.decode(this._datatype, array, array, this._globalHeap);
+            return this._dataspace.decode(this._datatype, array, this._globalHeap);
         }
         return null;
     }
@@ -547,7 +547,7 @@ hdf5.BinaryReader = class extends hdf5.Reader {
     stream(length) {
         const position = this.take(length);
         const buffer = this._buffer.subarray(position, position + length);
-        return new hdf5.BinaryReader(buffer);
+        return new hdf5.BinaryReader(buffer, undefined, undefined, undefined, this._offsetSize, this._lengthSize);
     }
 
     size(terminator) {
@@ -890,8 +890,8 @@ hdf5.Dataspace = class {
                     this._maxSizes = [];
                     for (let j = 0; j < this._dimensions; j++) {
                         this._maxSizes.push(reader.length());
-                        if (this._maxSizes[j] !== this._sizes[j]) {
-                            throw new hdf5.Error('Max size is not supported.');
+                        if (this._maxSizes[j] >= 0 && this._sizes[j] > this._maxSizes[j]) {
+                            throw new hdf5.Error('Dimension size exceeds max size.');
                         }
                     }
                 }
@@ -1081,7 +1081,7 @@ hdf5.Datatype = class {
                 break;
             case 9: // variable-length
                 if ((this._flags & 0x0f) === 1) { // type
-                    return 'char[]';
+                    return 'string';
                 }
                 break;
             default:

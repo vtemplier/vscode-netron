@@ -29,7 +29,7 @@ zip.Archive = class {
                     return new zlib.Archive(stream);
                 }
             }
-            if ((!format || format === 'gzip') && buffer.length > 18 && buffer[0] === 0x1f && buffer[1] === 0x8b) { // gzip
+            if ((!format || format === 'gzip') && buffer.length >= 18 && buffer[0] === 0x1f && buffer[1] === 0x8b) { // gzip
                 return new gzip.Archive(stream);
             }
             if (!format || format === 'zip') {
@@ -58,7 +58,7 @@ zip.Archive = class {
                     return null;
                 };
                 const read = (signature, size) => {
-                    if ((stream.position - size) > 0) {
+                    if ((stream.position - size) >= 0) {
                         stream.skip(-size);
                         signature = Array.from(signature, (c) => c.charCodeAt(0));
                         const buffer = stream.peek(size);
@@ -248,7 +248,7 @@ zip.Entry = class {
                 this._stream = new zip.InflaterStream(this._stream, header.size);
                 break;
             default:
-                this._stream = new new zip.ErrorStream(header.size, 'Invalid ZIP entry compression method.');
+                this._stream = new zip.ErrorStream(header.size, `Invalid ZIP entry compression method '${header.compressionMethod}'.`);
                 break;
         }
     }
@@ -266,7 +266,7 @@ zip.Inflater = class {
 
     inflateRaw(data, length, size) {
         let buffer = null;
-        if (zip.zlib && (size === undefined || size > 0x4000)) {
+        if (zip.zlib && size === undefined && (length === undefined || length > 0x4000)) {
             buffer = zip.zlib.inflateRawSync(data);
         } else {
             const reader = new zip.BitReader(data);
@@ -679,10 +679,16 @@ zip.ErrorStream = class {
 
     seek(position) {
         this._position = position >= 0 ? position : this._length + position;
+        if (this._position > this._length || this._position < 0) {
+            throw new zip.Error('Invalid ZIP data. Unexpected end of file.');
+        }
     }
 
     skip(offset) {
         this._position += offset;
+        if (this._position > this._length || this._position < 0) {
+            throw new zip.Error('Invalid ZIP data. Unexpected end of file.');
+        }
     }
 
     peek(/* length */) {
@@ -830,7 +836,7 @@ gzip.Archive = class {
             }
             return content;
         };
-        const fhcrc = header[3] & 1;
+        const fhcrc = header[3] & 2;
         const fextra = header[3] & 4;
         const fname = header[3] & 8;
         const fcomment = header[3] & 16;

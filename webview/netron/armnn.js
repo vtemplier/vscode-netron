@@ -176,8 +176,9 @@ armnn.Node = class {
                     const schema = metadata.attribute(name, key);
                     const type = schema ? schema.type : null;
                     let value = ArrayBuffer.isView(obj) ? Array.from(obj) : obj;
-                    if (armnn.schema[type]) {
-                        value = armnn.Utility.enum(type, value);
+                    const enumType = armnn.schema[type];
+                    if (enumType) {
+                        value = enumType[value] || value;
                     }
                     const attribute = new armnn.Argument(key, value, type);
                     this.attributes.push(attribute);
@@ -202,10 +203,10 @@ armnn.Node = class {
 
 armnn.Argument = class {
 
-    constructor(name, value, type) {
+    constructor(name, value, type = null) {
         this.name = name;
         this.value = value;
-        this.type = type || null;
+        this.type = type;
     }
 };
 
@@ -234,9 +235,9 @@ armnn.Value = class {
 
 armnn.Tensor = class {
 
-    constructor(tensor, category) {
+    constructor(tensor, category = '') {
         this.type = new armnn.TensorType(tensor.info);
-        this.category = category || '';
+        this.category = category;
         const data = tensor.data.data.slice(0);
         this.values = new Uint8Array(data.buffer, data.byteOffset, data.byteLength);
     }
@@ -279,25 +280,6 @@ armnn.TensorShape = class {
             return '';
         }
         return `[${this.dimensions.map((dimension) => dimension.toString()).join(',')}]`;
-    }
-};
-
-armnn.Utility = class {
-
-    static enum(name, value) {
-        const type = name && armnn.schema ? armnn.schema[name] : undefined;
-        if (type) {
-            armnn.Utility._enums = armnn.Utility._enums || new Map();
-            if (!armnn.Utility._enums.has(name)) {
-                const entries = new Map(Object.entries(type).map(([key, value]) => [value, key]));
-                armnn.Utility._enums.set(name, entries);
-            }
-            const entries = armnn.Utility._enums.get(name);
-            if (entries.has(value)) {
-                return entries.get(value);
-            }
-        }
-        return value;
     }
 };
 

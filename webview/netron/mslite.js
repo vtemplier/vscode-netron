@@ -123,7 +123,10 @@ mslite.Node = class {
                 const schema = metadata.attribute(this.type.name, key);
                 if (schema && schema.type) {
                     type = schema.type;
-                    value = type ? mslite.Utility.enum(type, value) : value;
+                    const enumType = mslite.schema[type];
+                    if (enumType) {
+                        value = enumType[value] || value;
+                    }
                 }
                 return new mslite.Argument(key.toString(), value, type);
             });
@@ -169,19 +172,19 @@ mslite.Node = class {
 
 mslite.Argument = class {
 
-    constructor(name, value, type) {
+    constructor(name, value, type = null) {
         this.name = name;
         this.value = value;
-        this.type = type || null;
+        this.type = type;
     }
 };
 
 mslite.Value = class {
 
-    constructor(name, tensor, initializer) {
+    constructor(name, tensor, initializer = null) {
         this.name = name;
         this.type = initializer ? initializer.type : new mslite.TensorType(tensor.dataType, tensor.dims);
-        this.initializer = initializer || null;
+        this.initializer = initializer;
         if (Array.isArray(tensor.quantParams) && tensor.quantParams.length > 0) {
             this.quantization = {
                 type: 'linear',
@@ -199,10 +202,10 @@ mslite.Value = class {
 
 mslite.Tensor = class {
 
-    constructor(type, data) {
+    constructor(type, data = null) {
         this.type = type;
         this.encoding = type.dataType === 'string' ? '|' : '<';
-        this._data = data || null;
+        this._data = data;
     }
 
     get values() {
@@ -305,27 +308,6 @@ mslite.TensorShape = class {
             return `[${this.dimensions.map((dimension) => dimension ? dimension.toString() : '?').join(',')}]`;
         }
         return '';
-    }
-};
-
-mslite.Utility = class {
-
-    static enum(name, value) {
-        mslite.Utility._enumKeyMap = mslite.Utility._enumKeyMap || new Map();
-        if (!mslite.Utility._enumKeyMap.has(name)) {
-            const type = name && mslite.schema ? mslite.schema[name] : undefined;
-            if (type) {
-                if (!mslite.Utility._enumKeyMap.has(name)) {
-                    const entries = new Map(Object.entries(type).map(([key, value]) => [value, key]));
-                    mslite.Utility._enumKeyMap.set(name, entries);
-                }
-            }
-        }
-        const map = mslite.Utility._enumKeyMap.get(name);
-        if (map && map.has(value)) {
-            return map.get(value);
-        }
-        return value;
     }
 };
 

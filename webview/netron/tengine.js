@@ -61,11 +61,11 @@ tengine.Graph = class {
 
 tengine.Argument = class {
 
-    constructor(name, value, type, visible) {
+    constructor(name, value, type = null, visible = true) {
         this.name = name;
         this.value = value;
-        this.type = type || null;
-        this.visible = visible !== false;
+        this.type = type;
+        this.visible = visible;
     }
 };
 
@@ -190,7 +190,7 @@ tengine.Metadata = class {
         if (!tengine.Metadata._metadata) {
             let data = null;
             try {
-                data = await context.request('tengine-metadata.json');
+                data = await context.asset('tengine-metadata.json');
             } catch {
                 // continue regardless of error
             }
@@ -526,14 +526,10 @@ tengine.Reader = class {
                 if (node.type === 'Convolution') {
                     switch (subgraph.graphLayout) {
                         case 0: // NCHW
-                            /* eslint-disable prefer-destructuring */
                             node.params[6] = subgraph.tensors[node.inputs[1]].dims[1];
-                            /* eslint-enable prefer-destructuring */
                             break;
                         case 1: // NHWC
-                            /* eslint-disable prefer-destructuring */
                             node.params[6] = subgraph.tensors[node.inputs[1]].dims[3];
-                            /* eslint-enable prefer-destructuring */
                             break;
                         default:
                             throw new tengine.Error(`Unsupported 'Convolution' layout '${subgraph.graphLayout}'.`);

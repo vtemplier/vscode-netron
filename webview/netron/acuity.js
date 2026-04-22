@@ -21,7 +21,7 @@ acuity.Model = class {
 
     constructor(metadata, model, data, quantization) {
         this.name = model.MetaData.Name;
-        this.format = `Acuity v${model.MetaData.AcuityVersion}`;
+        this.format = `Acuity${model.MetaData && model.MetaData.AcuityVersion ? ` v${model.MetaData.AcuityVersion}` : ''}`;
         this.runtime = model.MetaData.Platform;
         this.modules = [new acuity.Graph(metadata, model, data, quantization)];
     }
@@ -159,28 +159,24 @@ acuity.Node = class {
 
 acuity.Argument = class {
 
-    constructor(name, value, type, visible) {
+    constructor(name, value, type = null, visible = true) {
         this.name = name;
         this.value = value;
-        if (type) {
-            this.type = type;
-        }
-        if (visible === false) {
-            this.visible = false;
-        }
+        this.type = type;
+        this.visible = visible;
     }
 };
 
 acuity.Value = class {
 
-    constructor(name, type, quantization, initializer) {
+    constructor(name, type = null, quantization = null, initializer = null) {
         if (typeof name !== 'string') {
             throw new acuity.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
         this.name = name;
-        this.type = type || null;
-        this.quantization = quantization || null;
-        this.initializer = initializer || null;
+        this.type = type;
+        this.quantization = quantization;
+        this.initializer = initializer;
     }
 };
 
@@ -555,10 +551,8 @@ acuity.Inference = class {
         });
         operators.set('image_resize', (inputs, params) => {
             const newShape = inputs[0].slice();
-            /* eslint-disable prefer-destructuring */
             newShape[1] = params.new_size[0];
             newShape[2] = params.new_size[1];
-            /* eslint-enable prefer-destructuring */
             return [newShape];
         });
         operators.set('argmax', (inputs, params) => {

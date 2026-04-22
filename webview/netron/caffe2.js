@@ -108,9 +108,8 @@ caffe2.ModelFactory = class {
                     for (const extension of extensions) {
                         try {
                             const name = `${base.replace(/init_net$/, '')}predict_net.${extension}`;
-                            /* eslint-disable no-await-in-loop */
+                            // eslint-disable-next-line no-await-in-loop
                             predict = await context.fetch(name);
-                            /* eslint-enable no-await-in-loop */
                             predict.set(`caffe2.${extension}`);
                             break;
                         } catch {
@@ -328,24 +327,24 @@ caffe2.Graph = class {
 
 caffe2.Argument = class {
 
-    constructor(name, value, type, visible) {
+    constructor(name, value, type = null, visible = true) {
         this.name = name;
         this.value = value;
-        this.type = type || null;
-        this.visible = visible !== false;
+        this.type = type;
+        this.visible = visible;
     }
 };
 
 caffe2.Value = class {
 
-    constructor(name, type, initializer) {
+    constructor(name, type, initializer = null) {
         if (typeof name !== 'string') {
             throw new caffe2.Error(`Invalid value identifier '${JSON.stringify(name)}'.`);
         }
         this.name = name;
         this.type = !type && initializer ? initializer.type : type;
         this.quantization = initializer && initializer.quantization ? initializer.quantization : null;
-        this.initializer = initializer || null;
+        this.initializer = initializer;
     }
 };
 

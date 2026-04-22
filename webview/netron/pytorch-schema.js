@@ -149,11 +149,11 @@ torch.jit.mobile.serialization.Dict = class Dict {
 };
 
 torch.jit.mobile.serialization.TypeType = {
-    UNSET: 0,
-    CLASS_WITH_FIELD: 1,
-    CUSTOM_CLASS: 2,
-    CLASS_WITH_SETSTATE: 3,
-    NON_OBJ: 4
+    UNSET: 0, '0': 'UNSET',
+    CLASS_WITH_FIELD: 1, '1': 'CLASS_WITH_FIELD',
+    CUSTOM_CLASS: 2, '2': 'CUSTOM_CLASS',
+    CLASS_WITH_SETSTATE: 3, '3': 'CLASS_WITH_SETSTATE',
+    NON_OBJ: 4, '4': 'NON_OBJ'
 };
 
 torch.jit.mobile.serialization.ObjectType = class ObjectType {
@@ -256,7 +256,7 @@ torch.jit.mobile.serialization.Function = class Function {
     static decode(reader, position) {
         const $ = new torch.jit.mobile.serialization.Function();
         $.qn = reader.string_(position, 4, null);
-        $.instructions = reader.structs(position, 6, torch.jit.mobile.serialization.Instruction);
+        $.instructions = reader.structs(position, 6, torch.jit.mobile.serialization.Instruction, 8);
         $.operators = reader.tables(position, 8, torch.jit.mobile.serialization.Operator);
         $.constants = reader.array(position, 10, Uint32Array);
         $.type_annotations = reader.strings_(position, 12);
