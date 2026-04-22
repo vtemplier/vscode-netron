@@ -2,7 +2,7 @@
   "name": "vscode-netron",
   "displayName": "vscode-netron",
   "description": "Visualize machine learning models with Netron in VSCode",
-  "version": "1.1.6",
+  "version": "1.1.7",
   "engines": {
     "vscode": "^1.86.0"
   },
@@ -96,7 +96,29 @@
         "command": "vscode-netron.open_webbrowser",
         "title": "Start Netron Web"
       }
-    ]
+    ],
+    "customEditors": [
+      {
+        "viewType": "vscode-netron.viewer",
+        "displayName": "Netron Viewer",
+        "selector": [
+          { "filenamePattern": "*.onnx" },
+          { "filenamePattern": "*.pt" },
+          { "filenamePattern": "*.pt2" },
+          { "filenamePattern": "*.tflite" },
+          { "filenamePattern": "*.pb" },
+          { "filenamePattern": "*.h5" },
+          { "filenamePattern": "*.cntk" },
+          { "filenamePattern": "*.ckpt" },
+          { "filenamePattern": "*.pte" },
+          { "filenamePattern": "*.graphdef" },
+          { "filenamePattern": "*.tf" },
+          { "filenamePattern": "*.torchscript" },
+          { "filenamePattern": "*.paddle" }
+        ],
+        "priority": "default"
+      }
+]
   },
   "icon": "docs/netron-logo_128x128px.png",
   "repository": {

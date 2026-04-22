@@ -31,6 +31,29 @@ function getNetronURL() {
 	</html>`;
 }
 
+class NetronEditorProvider implements vscode.CustomReadonlyEditorProvider {
+
+	constructor(private context: vscode.ExtensionContext) {}
+
+	async openCustomDocument(uri: vscode.Uri): Promise<vscode.CustomDocument> {
+		return { uri, dispose: () => {} };
+	}
+
+	async resolveCustomEditor(
+		document: vscode.CustomDocument,
+		webviewPanel: vscode.WebviewPanel
+	): Promise<void> {
+
+		// Use existing command to open the model in a new webview panel
+		await vscode.commands.executeCommand(
+			'vscode-netron.open',
+			document.uri
+		);
+
+		webviewPanel.dispose();
+	}
+}
+
 
 export function activate(context: vscode.ExtensionContext) {
 
@@ -126,6 +149,19 @@ export function activate(context: vscode.ExtensionContext) {
 			
 			panel.webview.html = getNetronURL();
 		})
+	);
+
+	
+	context.subscriptions.push(
+		vscode.window.registerCustomEditorProvider(
+			'vscode-netron.viewer',
+			new NetronEditorProvider(context),
+			{
+				webviewOptions: {
+					retainContextWhenHidden: true
+				}
+			}
+		)
 	);
 }
 
