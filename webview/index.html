@@ -634,6 +634,24 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 			vscode.postMessage({command: 'alert',
 								text: message + "\n" + detail})
 		};
+		let exportRequestId = 0;
+		const exportRequests = new Map();
+
+		window.__view__._host.export = async function(file, blob) {
+			const id = ++exportRequestId;
+			const buffer = await blob.arrayBuffer();
+
+			return new Promise((resolve, reject) => {
+				exportRequests.set(id, { resolve, reject });
+				vscode.postMessage({
+					command: 'export',
+					id,
+					file,
+					type: blob.type,
+					data: Array.from(new Uint8Array(buffer))
+				});
+			});
+		};
 
 		// Ask to host to send model
 		vscode.postMessage({command: 'request_model'});
@@ -646,6 +664,18 @@ button { font-family: -apple-system, BlinkMacSystemFont, "Segoe WPC", "Segoe UI"
 					const file1 = new File([Uint8Array.from(message.value)], "%GRAPHNAME%", {type: ''});
 					window.__view__._host._open(file1, [file1]);
 					break;
+				case 'export_complete': {
+					const request = exportRequests.get(message.id);
+					if (request) {
+						exportRequests.delete(message.id);
+						if (message.error) {
+							request.reject(new Error(message.error));
+						} else {
+							request.resolve();
+						}
+					}
+					break;
+				}
 			}
 				
 		});

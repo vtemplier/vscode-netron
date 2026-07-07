@@ -115,7 +115,7 @@ export function activate(context: vscode.ExtensionContext) {
 			panel.webview.html = html;
 
 			panel.webview.onDidReceiveMessage(
-				message => {
+				async message => {
 				  switch (message.command) {
 					case 'alert':
 						vscode.window.showErrorMessage(message.text);
@@ -125,6 +125,29 @@ export function activate(context: vscode.ExtensionContext) {
 							command: "transmit_model", 
 							value: Uint8Array.from(fs.readFileSync(modelFile!)).subarray()});
 						return;
+					case 'export': {
+						const fileName = path.basename(message.file || `${baseName}.png`);
+						const extension = path.extname(fileName).replace(/^\./, '').toLowerCase();
+						const filters = extension ? { [extension.toUpperCase()]: [extension] } : undefined;
+						const defaultUri = vscode.Uri.file(path.join(path.dirname(modelFile!), fileName));
+
+						try {
+							const uri = await vscode.window.showSaveDialog({
+								defaultUri,
+								filters,
+								saveLabel: 'Export'
+							});
+							if (uri) {
+								await vscode.workspace.fs.writeFile(uri, Uint8Array.from(message.data || []));
+							}
+							panel.webview.postMessage({ command: 'export_complete', id: message.id });
+						} catch (error) {
+							const text = error instanceof Error ? error.message : String(error);
+							panel.webview.postMessage({ command: 'export_complete', id: message.id, error: text });
+							vscode.window.showErrorMessage(text);
+						}
+						return;
+					}
 				  }
 				},
 				undefined,
