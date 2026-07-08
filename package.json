@@ -18,7 +18,8 @@
     "keras",
     "tflite",
     "paddle",
-    "ncnn"
+    "ncnn",
+    "rknn"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
@@ -45,7 +46,8 @@
           ".safetensors",
           ".gguf",
           ".paddle",
-          ".param"
+          ".param",
+          ".rknn"
         ],
         "icon": {
           "light": "docs/icon/netron-black.svg",
@@ -117,7 +119,8 @@
           { "filenamePattern": "*.tf" },
           { "filenamePattern": "*.torchscript" },
           { "filenamePattern": "*.paddle" },
-          { "filenamePattern": "*.param" }
+          { "filenamePattern": "*.param" },
+          { "filenamePattern": "*.rknn" }
         ],
         "priority": "default"
       }
