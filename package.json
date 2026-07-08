@@ -17,7 +17,8 @@
     "tensorflow",
     "keras",
     "tflite",
-    "paddle"
+    "paddle",
+    "ncnn"
   ],
   "activationEvents": [],
   "main": "./out/extension.js",
@@ -43,7 +44,8 @@
           ".engine",
           ".safetensors",
           ".gguf",
-          ".paddle"
+          ".paddle",
+          ".param"
         ],
         "icon": {
           "light": "docs/icon/netron-black.svg",
@@ -55,35 +57,35 @@
       "commandPalette": [
         {
           "command": "vscode-netron.open",
-          "when": "editorLangId == json || editorLangId == jsonc || resourceLangId == json || resourceLangId == jsonc || resourceExtname =~ /(.armnn|.bin|.bin.index.json|.bigdl|.bson|.caffemodel|.cambricon|.cbm|.cfg|.cfg.ncnn|.chkpt|.circle|.cmf|.cntk|.ckpt|.dms|.dnn|.dlc|.engine|.ff|.featuredescriptions.json|.gguf|.graphdef|.h5|.hdf5|.hd5|.hkl|.hnn|.joblib|.json|.keras|.kmodel|.lasagne|.lite|.manifest.json|.mar|.maxviz|.metadata.json|.mgc|.mge|.mlir|.mlmodel|.mlpackage|.model|.model2|.model.weights.npz|.model.weights.txt|.msgpack|.ms|.nnef|.nn|.nb|.nntxt|.npz|.npy|.om|.onnx|.onn|.onnxtxt|.ot|.paddle|.params|.pb|.pbmm|.pbtxt|.pickle|.pickle.dat|.pdiparams|.pdmodel|.pdopt|.pdparams|.pkl|.plan|.protobuf|.prototxt|.pte|.ptmf|.ptl|.pt|.pt2|.pth|.pyt|.pyth|.python|.rknn|.safetensors|.sentencepiece|.tm|.tmfile|.tckpt|.t7|.tf|.tfl|.tflite|.tgz|.tmfile|.tnn|.tnnmodel|.torchmodel|.torchscript|.trt|.trtmodel|.tckpt|.txt|.uff|.uff.txt|.xgb|.xml|.xmodel|.zip|.zlib)$/"
+          "when": "editorLangId == json || editorLangId == jsonc || resourceLangId == json || resourceLangId == jsonc || resourceExtname =~ /(.armnn|.bin|.bin.index.json|.bigdl|.bson|.caffemodel|.cambricon|.cbm|.cfg|.cfg.ncnn|.chkpt|.circle|.cmf|.cntk|.ckpt|.dms|.dnn|.dlc|.engine|.ff|.featuredescriptions.json|.gguf|.graphdef|.h5|.hdf5|.hd5|.hkl|.hnn|.joblib|.json|.keras|.kmodel|.lasagne|.lite|.manifest.json|.mar|.maxviz|.metadata.json|.mgc|.mge|.mlir|.mlmodel|.mlpackage|.model|.model2|.model.weights.npz|.model.weights.txt|.msgpack|.ms|.nnef|.nn|.nb|.nntxt|.npz|.npy|.om|.onnx|.onn|.onnxtxt|.ot|.paddle|.params|.pb|.pbmm|.pbtxt|.pickle|.pickle.dat|.pdiparams|.pdmodel|.pdopt|.pdparams|.pkl|.plan|.protobuf|.prototxt|.pte|.ptmf|.ptl|.pt|.pt2|.pth|.pyt|.pyth|.python|.rknn|.safetensors|.sentencepiece|.tm|.tmfile|.tckpt|.t7|.tf|.tfl|.tflite|.tgz|.tmfile|.tnn|.tnnmodel|.torchmodel|.torchscript|.trt|.trtmodel|.tckpt|.txt|.uff|.uff.txt|.xgb|.xml|.xmodel|.zip|.zlib|.param)$/"
         }
       ],
       "editor/context": [
         {
           "command": "vscode-netron.open",
           "group": "YourGroup@1",
-          "when": "editorLangId == json || editorLangId == jsonc || resourceLangId == json || resourceLangId == jsonc || resourceExtname =~ /(.armnn|.bin|.bin.index.json|.bigdl|.bson|.caffemodel|.cambricon|.cbm|.cfg|.cfg.ncnn|.chkpt|.circle|.cmf|.cntk|.ckpt|.dms|.dnn|.dlc|.engine|.ff|.featuredescriptions.json|.gguf|.graphdef|.h5|.hdf5|.hd5|.hkl|.hnn|.joblib|.json|.keras|.kmodel|.lasagne|.lite|.manifest.json|.mar|.maxviz|.metadata.json|.mgc|.mge|.mlir|.mlmodel|.mlpackage|.model|.model2|.model.weights.npz|.model.weights.txt|.msgpack|.ms|.nnef|.nn|.nb|.nntxt|.npz|.npy|.om|.onnx|.onn|.onnxtxt|.ot|.paddle|.params|.pb|.pbmm|.pbtxt|.pickle|.pickle.dat|.pdiparams|.pdmodel|.pdopt|.pdparams|.pkl|.plan|.protobuf|.prototxt|.pte|.ptmf|.ptl|.pt|.pt2|.pth|.pyt|.pyth|.python|.rknn|.safetensors|.sentencepiece|.tm|.tmfile|.tckpt|.t7|.tf|.tfl|.tflite|.tgz|.tmfile|.tnn|.tnnmodel|.torchmodel|.torchscript|.trt|.trtmodel|.tckpt|.txt|.uff|.uff.txt|.xgb|.xml|.xmodel|.zip|.zlib)$/"
+          "when": "editorLangId == json || editorLangId == jsonc || resourceLangId == json || resourceLangId == jsonc || resourceExtname =~ /(.armnn|.bin|.bin.index.json|.bigdl|.bson|.caffemodel|.cambricon|.cbm|.cfg|.cfg.ncnn|.chkpt|.circle|.cmf|.cntk|.ckpt|.dms|.dnn|.dlc|.engine|.ff|.featuredescriptions.json|.gguf|.graphdef|.h5|.hdf5|.hd5|.hkl|.hnn|.joblib|.json|.keras|.kmodel|.lasagne|.lite|.manifest.json|.mar|.maxviz|.metadata.json|.mgc|.mge|.mlir|.mlmodel|.mlpackage|.model|.model2|.model.weights.npz|.model.weights.txt|.msgpack|.ms|.nnef|.nn|.nb|.nntxt|.npz|.npy|.om|.onnx|.onn|.onnxtxt|.ot|.paddle|.params|.pb|.pbmm|.pbtxt|.pickle|.pickle.dat|.pdiparams|.pdmodel|.pdopt|.pdparams|.pkl|.plan|.protobuf|.prototxt|.pte|.ptmf|.ptl|.pt|.pt2|.pth|.pyt|.pyth|.python|.rknn|.safetensors|.sentencepiece|.tm|.tmfile|.tckpt|.t7|.tf|.tfl|.tflite|.tgz|.tmfile|.tnn|.tnnmodel|.torchmodel|.torchscript|.trt|.trtmodel|.tckpt|.txt|.uff|.uff.txt|.xgb|.xml|.xmodel|.zip|.zlib|.param)$/"
         }
       ],
       "editor/title": [
         {
           "command": "vscode-netron.open",
           "group": "navigation",
-          "when": "editorLangId == json || editorLangId == jsonc || resourceLangId == json || resourceLangId == jsonc || resourceExtname =~ /(.armnn|.bin|.bin.index.json|.bigdl|.bson|.caffemodel|.cambricon|.cbm|.cfg|.cfg.ncnn|.chkpt|.circle|.cmf|.cntk|.ckpt|.dms|.dnn|.dlc|.engine|.ff|.featuredescriptions.json|.gguf|.graphdef|.h5|.hdf5|.hd5|.hkl|.hnn|.joblib|.json|.keras|.kmodel|.lasagne|.lite|.manifest.json|.mar|.maxviz|.metadata.json|.mgc|.mge|.mlir|.mlmodel|.mlpackage|.model|.model2|.model.weights.npz|.model.weights.txt|.msgpack|.ms|.nnef|.nn|.nb|.nntxt|.npz|.npy|.om|.onnx|.onn|.onnxtxt|.ot|.paddle|.params|.pb|.pbmm|.pbtxt|.pickle|.pickle.dat|.pdiparams|.pdmodel|.pdopt|.pdparams|.pkl|.plan|.protobuf|.prototxt|.pte|.ptmf|.ptl|.pt|.pt2|.pth|.pyt|.pyth|.python|.rknn|.safetensors|.sentencepiece|.tm|.tmfile|.tckpt|.t7|.tf|.tfl|.tflite|.tgz|.tmfile|.tnn|.tnnmodel|.torchmodel|.torchscript|.trt|.trtmodel|.tckpt|.txt|.uff|.uff.txt|.xgb|.xml|.xmodel|.zip|.zlib)$/"
+          "when": "editorLangId == json || editorLangId == jsonc || resourceLangId == json || resourceLangId == jsonc || resourceExtname =~ /(.armnn|.bin|.bin.index.json|.bigdl|.bson|.caffemodel|.cambricon|.cbm|.cfg|.cfg.ncnn|.chkpt|.circle|.cmf|.cntk|.ckpt|.dms|.dnn|.dlc|.engine|.ff|.featuredescriptions.json|.gguf|.graphdef|.h5|.hdf5|.hd5|.hkl|.hnn|.joblib|.json|.keras|.kmodel|.lasagne|.lite|.manifest.json|.mar|.maxviz|.metadata.json|.mgc|.mge|.mlir|.mlmodel|.mlpackage|.model|.model2|.model.weights.npz|.model.weights.txt|.msgpack|.ms|.nnef|.nn|.nb|.nntxt|.npz|.npy|.om|.onnx|.onn|.onnxtxt|.ot|.paddle|.params|.pb|.pbmm|.pbtxt|.pickle|.pickle.dat|.pdiparams|.pdmodel|.pdopt|.pdparams|.pkl|.plan|.protobuf|.prototxt|.pte|.ptmf|.ptl|.pt|.pt2|.pth|.pyt|.pyth|.python|.rknn|.safetensors|.sentencepiece|.tm|.tmfile|.tckpt|.t7|.tf|.tfl|.tflite|.tgz|.tmfile|.tnn|.tnnmodel|.torchmodel|.torchscript|.trt|.trtmodel|.tckpt|.txt|.uff|.uff.txt|.xgb|.xml|.xmodel|.zip|.zlib|.param)$/"
         }
       ],
       "editor/title/context": [
         {
           "command": "vscode-netron.open",
           "group": "YourGroup@1",
-          "when": "editorLangId == json || editorLangId == jsonc || resourceLangId == json || resourceLangId == jsonc || resourceExtname =~ /(.armnn|.bin|.bin.index.json|.bigdl|.bson|.caffemodel|.cambricon|.cbm|.cfg|.cfg.ncnn|.chkpt|.circle|.cmf|.cntk|.ckpt|.dms|.dnn|.dlc|.engine|.ff|.featuredescriptions.json|.gguf|.graphdef|.h5|.hdf5|.hd5|.hkl|.hnn|.joblib|.json|.keras|.kmodel|.lasagne|.lite|.manifest.json|.mar|.maxviz|.metadata.json|.mgc|.mge|.mlir|.mlmodel|.mlpackage|.model|.model2|.model.weights.npz|.model.weights.txt|.msgpack|.ms|.nnef|.nn|.nb|.nntxt|.npz|.npy|.om|.onnx|.onn|.onnxtxt|.ot|.paddle|.params|.pb|.pbmm|.pbtxt|.pickle|.pickle.dat|.pdiparams|.pdmodel|.pdopt|.pdparams|.pkl|.plan|.protobuf|.prototxt|.pte|.ptmf|.ptl|.pt|.pt2|.pth|.pyt|.pyth|.python|.rknn|.safetensors|.sentencepiece|.tm|.tmfile|.tckpt|.t7|.tf|.tfl|.tflite|.tgz|.tmfile|.tnn|.tnnmodel|.torchmodel|.torchscript|.trt|.trtmodel|.tckpt|.txt|.uff|.uff.txt|.xgb|.xml|.xmodel|.zip|.zlib)$/"
+          "when": "editorLangId == json || editorLangId == jsonc || resourceLangId == json || resourceLangId == jsonc || resourceExtname =~ /(.armnn|.bin|.bin.index.json|.bigdl|.bson|.caffemodel|.cambricon|.cbm|.cfg|.cfg.ncnn|.chkpt|.circle|.cmf|.cntk|.ckpt|.dms|.dnn|.dlc|.engine|.ff|.featuredescriptions.json|.gguf|.graphdef|.h5|.hdf5|.hd5|.hkl|.hnn|.joblib|.json|.keras|.kmodel|.lasagne|.lite|.manifest.json|.mar|.maxviz|.metadata.json|.mgc|.mge|.mlir|.mlmodel|.mlpackage|.model|.model2|.model.weights.npz|.model.weights.txt|.msgpack|.ms|.nnef|.nn|.nb|.nntxt|.npz|.npy|.om|.onnx|.onn|.onnxtxt|.ot|.paddle|.params|.pb|.pbmm|.pbtxt|.pickle|.pickle.dat|.pdiparams|.pdmodel|.pdopt|.pdparams|.pkl|.plan|.protobuf|.prototxt|.pte|.ptmf|.ptl|.pt|.pt2|.pth|.pyt|.pyth|.python|.rknn|.safetensors|.sentencepiece|.tm|.tmfile|.tckpt|.t7|.tf|.tfl|.tflite|.tgz|.tmfile|.tnn|.tnnmodel|.torchmodel|.torchscript|.trt|.trtmodel|.tckpt|.txt|.uff|.uff.txt|.xgb|.xml|.xmodel|.zip|.zlib|.param)$/"
         }
       ],
       "explorer/context": [
         {
           "command": "vscode-netron.open",
           "group": "YourGroup@1",
-          "when": "editorLangId == json || editorLangId == jsonc || resourceLangId == json || resourceLangId == jsonc || resourceExtname =~ /(.armnn|.bin|.bin.index.json|.bigdl|.bson|.caffemodel|.cambricon|.cbm|.cfg|.cfg.ncnn|.chkpt|.circle|.cmf|.cntk|.ckpt|.dms|.dnn|.dlc|.engine|.ff|.featuredescriptions.json|.gguf|.graphdef|.h5|.hdf5|.hd5|.hkl|.hnn|.joblib|.json|.keras|.kmodel|.lasagne|.lite|.manifest.json|.mar|.maxviz|.metadata.json|.mgc|.mge|.mlir|.mlmodel|.mlpackage|.model|.model2|.model.weights.npz|.model.weights.txt|.msgpack|.ms|.nnef|.nn|.nb|.nntxt|.npz|.npy|.om|.onnx|.onn|.onnxtxt|.ot|.paddle|.params|.pb|.pbmm|.pbtxt|.pickle|.pickle.dat|.pdiparams|.pdmodel|.pdopt|.pdparams|.pkl|.plan|.protobuf|.prototxt|.pte|.ptmf|.ptl|.pt|.pt2|.pth|.pyt|.pyth|.python|.rknn|.safetensors|.sentencepiece|.tm|.tmfile|.tckpt|.t7|.tf|.tfl|.tflite|.tgz|.tmfile|.tnn|.tnnmodel|.torchmodel|.torchscript|.trt|.trtmodel|.tckpt|.txt|.uff|.uff.txt|.xgb|.xml|.xmodel|.zip|.zlib)$/"
+          "when": "editorLangId == json || editorLangId == jsonc || resourceLangId == json || resourceLangId == jsonc || resourceExtname =~ /(.armnn|.bin|.bin.index.json|.bigdl|.bson|.caffemodel|.cambricon|.cbm|.cfg|.cfg.ncnn|.chkpt|.circle|.cmf|.cntk|.ckpt|.dms|.dnn|.dlc|.engine|.ff|.featuredescriptions.json|.gguf|.graphdef|.h5|.hdf5|.hd5|.hkl|.hnn|.joblib|.json|.keras|.kmodel|.lasagne|.lite|.manifest.json|.mar|.maxviz|.metadata.json|.mgc|.mge|.mlir|.mlmodel|.mlpackage|.model|.model2|.model.weights.npz|.model.weights.txt|.msgpack|.ms|.nnef|.nn|.nb|.nntxt|.npz|.npy|.om|.onnx|.onn|.onnxtxt|.ot|.paddle|.params|.pb|.pbmm|.pbtxt|.pickle|.pickle.dat|.pdiparams|.pdmodel|.pdopt|.pdparams|.pkl|.plan|.protobuf|.prototxt|.pte|.ptmf|.ptl|.pt|.pt2|.pth|.pyt|.pyth|.python|.rknn|.safetensors|.sentencepiece|.tm|.tmfile|.tckpt|.t7|.tf|.tfl|.tflite|.tgz|.tmfile|.tnn|.tnnmodel|.torchmodel|.torchscript|.trt|.trtmodel|.tckpt|.txt|.uff|.uff.txt|.xgb|.xml|.xmodel|.zip|.zlib|.param)$/"
         }
       ]
     },
@@ -114,7 +116,8 @@
           { "filenamePattern": "*.graphdef" },
           { "filenamePattern": "*.tf" },
           { "filenamePattern": "*.torchscript" },
-          { "filenamePattern": "*.paddle" }
+          { "filenamePattern": "*.paddle" },
+          { "filenamePattern": "*.param" }
         ],
         "priority": "default"
       }
