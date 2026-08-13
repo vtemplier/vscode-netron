@@ -701,7 +701,7 @@ base.Tensor = class {
             ['uint8', 1], ['uint16', 2], ['uint32', 4,], ['uint64', 8],
             ['float16', 2], ['float32', 4], ['float64', 8], ['float80', 10], ['float128', 16], ['bfloat16', 2],
             ['complex<float32>', 8], ['complex<float64>', 16], ['complex<int32>', 8],
-            ['float8e4m3fn', 1], ['float8e4m3fnuz', 1], ['float8e5m2', 1], ['float8e5m2fnuz', 1], ['float8e4m3b11fnuz', 1], ['float8e3m4', 1], ['float8e4m3', 1], ['float4e2m1fn', 1], ['float6e2m3fn', 1], ['float6e3m2fn', 1], ['float8e8m0fnu', 1], ['float8e8m0', 1]
+            ['float8e4m3fn', 1], ['float8e4m3fnuz', 1], ['float8e5m2', 1], ['float8e5m2fnuz', 1], ['float8e4m3b11fnuz', 1], ['float8e3m4', 1], ['float8e4m3', 1], ['float6e2m3fn', 1], ['float6e3m2fn', 1], ['float8e8m0fnu', 1], ['float8e8m0', 1]
         ]);
     }
 
@@ -849,7 +849,7 @@ base.Tensor = class {
                             const length = context.data.length;
                             const stride = context.stride;
                             if (length < (itemsize * shape.reduce((a, v) => a * v, 1)) && !stride.every((v) => v === 0)) {
-                                const max = stride.reduce((a, v, i) => v > stride[i] ? i : a, 0);
+                                const max = stride.reduce((a, v, i) => v > stride[a] ? i : a, 0);
                                 if (length !== (itemsize * stride[max] * shape[max])) {
                                     throw new Error('Invalid tensor data size.');
                                 }
@@ -864,8 +864,8 @@ base.Tensor = class {
                             context.dataType = 'int';
                             context.bits = parseInt(dataType.substring(3), 10);
                             context.itemsize = 1;
-                        } else if (dataType === 'float4e2m1') {
-                            context.dataType = 'float4e2m1';
+                        } else if (dataType === 'float4e2m1' || dataType === 'float4e2m1fn') {
+                            context.dataType = dataType;
                             context.bits = 4;
                             context.itemsize = 1;
                         } else if (dataType === 'quint4x2') {
@@ -884,7 +884,7 @@ base.Tensor = class {
                     case '|': {
                         context.data = this.values;
                         const integer = (dataType.startsWith('int') && !isNaN(parseInt(dataType.substring(3), 10))) || (dataType.startsWith('uint') && !isNaN(parseInt(dataType.substring(4), 10)));
-                        if (!base.Tensor._dataTypes.has(dataType) && dataType !== 'string' && dataType !== 'object' && dataType !== 'datetime' && dataType !== 'void' && !integer) {
+                        if (!base.Tensor._dataTypes.has(dataType) && dataType !== 'string' && dataType !== 'object' && dataType !== 'datetime' && dataType !== 'void' && dataType !== 'float4e2m1' && dataType !== 'float4e2m1fn' && !integer) {
                             throw new Error(`Tensor data type '${dataType}' is not implemented.`);
                         }
                         const size = context.dimensions.reduce((a, v) => a * v, 1);
@@ -916,10 +916,20 @@ base.Tensor = class {
                 break;
         }
         if (indices.length > 0) {
-            if (Object.prototype.hasOwnProperty.call(indices[0], 'low')) {
+            if (Array.isArray(indices[0])) {
+                const rank = indices[0].length;
+                const strides = new Array(rank);
+                let stride = 1;
+                for (let i = rank - 1; i >= 0; i--) {
+                    strides[i] = stride;
+                    stride *= dimensions[i];
+                }
                 for (let i = 0; i < indices.length; i++) {
-                    const index = indices[i].toNumber();
-                    array[index] = values[i];
+                    let offset = 0;
+                    for (let j = 0; j < rank; j++) {
+                        offset += Number(indices[i][j]) * strides[j];
+                    }
+                    array[offset] = values[i];
                 }
             } else {
                 for (let i = 0; i < indices.length; i++) {
@@ -1049,6 +1059,7 @@ base.Tensor = class {
                     }
                     break;
                 case 'float4e2m1':
+                case 'float4e2m1fn':
                     for (let i = 0; i < length; i++, offset += stride) {
                         results.push(view.getFloat4e2m1(offset));
                     }
@@ -1190,6 +1201,10 @@ base.Tensor = class {
                         content += x >= 32 && x <= 126 ? String.fromCharCode(x) : `\\x${x.toString(16).padStart(2, '0')}`;
                     }
                     return `${indentation}"${content}"`;
+                }
+                if (value && value.constructor === Object) {
+                    const entries = Object.entries(value).map(([key, item]) => `${key}: ${base.Tensor._stringify(item, '', indent).trimStart()}`);
+                    return `${indentation}{ ${entries.join(', ')} }`;
                 }
                 if (value && value.toString) {
                     return `${indentation}${value.toString()}`;
@@ -1398,14 +1413,16 @@ base.Metadata = class {
             'hd5', 'hdf5',
             'jax_export', 'jax_exported',
             'keras',
-            'tfl', 'circle', 'lite',
+            'tfl', 'circle',
+            'lite', 'litertlm',
             'mlir', 'mlirbc', 'mlnet', 'mar', 'maxviz', 'meta', 'nn', 'ngf', 'hn',
             'param', 'params',
             'paddle', 'pdiparams', 'pdmodel', 'pdopt', 'pdparams', 'nb',
             'pkl', 'pickle', 'joblib', 'safetensors',
             'ptl', 't7',
             'dlc', 'uff', 'armnn', 'kann', 'kgraph', 'tosa',
-            'mnn', 'ms', 'ncnn', 'om', 'tm', 'mge', 'tmfile', 'tnnproto', 'xmodel', 'kmodel', 'rknn', 'espdl',
+            'ms', 'mindir', 'om',
+            'mnn', 'ncnn', 'tm', 'mge', 'tmfile', 'tnnproto', 'xmodel', 'kmodel', 'rknn', 'espdl',
             'tar', 'zip'
         ];
     }

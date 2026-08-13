@@ -747,7 +747,6 @@ vulkan.Reader = class {
     async read() {
         this.reader.seek(this.flatbuffer.offset);
         const metadata = new vulkan.Metadata(this.target.execution);
-        metadata.register('conv_with_clamp(Tensor input, Tensor weight, Tensor? bias, SymInt[] stride, SymInt[] padding, SymInt[] dilation, bool transposed, SymInt[] output_padding, SymInt groups, Scalar? output_min, Scalar? output_max) -> Tensor)');
         const flatbuffers = await import('./flatbuffers.js');
         const data = this.reader.read(this.flatbuffer.size);
         const reader = flatbuffers.BinaryReader.open(data);
@@ -761,6 +760,9 @@ vulkan.Reader = class {
 
     constant(id) {
         const constant = this.graph.constants[id];
+        if (constant.named_key && constant.offset === 0xffffffffffffffffn) {
+            return this.target.segment(constant.named_key);
+        }
         const offset = constant.offset;
         const length = constant.length;
         this.reader.seek(this.constants.offset + offset.toNumber());
@@ -946,7 +948,10 @@ vulkan.Metadata = class {
 
     type(identifier) {
         identifier = identifier.split(/\.([^.]*)$/);
-        const name = identifier[0].replace('.', '::');
+        let name = identifier[0].replace('.', '::');
+        if (name.indexOf('::') === -1) {
+            name = `et_vk::${name}`;
+        }
         const overload = identifier[1] === 'default' ? '' : identifier[1];
         const torch = this.execution.__import__('torch');
         const schemas = torch._C._jit_get_schemas_for_operator(name);

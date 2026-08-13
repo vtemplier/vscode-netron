@@ -7169,7 +7169,7 @@ python.Execution = class {
         this.registerFunction('torch._C.tupleConstruct', (stack, num_inputs) => {
             torch._C.TORCH_CHECK(num_inputs <= stack.length);
             const elems = stack.splice(stack.length - num_inputs, num_inputs);
-            const tuple = torch._C.Tuple.create(elems.reverse());
+            const tuple = torch._C.Tuple.create(elems);
             stack.push(new torch._C.IValue(tuple));
         });
         this.registerFunction('torch._C.runNodeIfInputsAreConstant', (n, ignore_custom_classes, db) => {
@@ -12992,6 +12992,9 @@ python.Execution = class {
                 return this._values.get(name)[0];
             }
             ival_(name, value) {
+                if (!(value instanceof torch._C.IValue)) {
+                    throw new python.Error('ival_ expects IValue.');
+                }
                 this._values.set(name, [value, 'ival']);
                 return this;
             }
@@ -13240,6 +13243,9 @@ python.Execution = class {
                 if (value instanceof torch.Value) {
                     throw new python.Error('Value cannot be a value.');
                 }
+                if (value instanceof torch._C.IValue) {
+                    throw new python.Error('IValue must be unwrapped before assignment.');
+                }
                 this._value = value;
             }
             get value() { // remove
@@ -13385,11 +13391,20 @@ python.Execution = class {
             isGenerator() {
                 return this.tag === 'Generator';
             }
+            toGenerator() {
+                return this.value;
+            }
             isStream() {
                 return this.tag === 'Stream';
             }
+            toStream() {
+                return this.value;
+            }
             isGenericDict() {
                 return this.tag === 'GenericDict';
+            }
+            toGenericDict() {
+                return this.value;
             }
             isEnum() {
                 return this.tag === 'Enum';
@@ -15422,7 +15437,7 @@ python.Execution = class {
                     n.s_('value', val.toDevice().__str__());
                     n.output().setType(torch.DeviceObjType.get());
                 } else if (val.isGenerator()) {
-                    n.ival_('value', val.toGenerator());
+                    n.ival_('value', val);
                     n.output().setType(torch._C_._GeneratorType.get());
                 } else if (val.isStream()) {
                     n.ival_('value', val);
@@ -15466,7 +15481,6 @@ python.Execution = class {
             const n = g.create('prim::Constant');
             let type = null;
             if (val === null) {
-                n.ival_('value', val);
                 type = torch.NoneType.get();
             } else if (typeof val === 'string') {
                 n.s_('value', val);
@@ -15487,10 +15501,12 @@ python.Execution = class {
                 n.t_('value', val);
                 type = torch.TensorType.get();
             } else if (val instanceof torch.ScriptObject) {
-                n.ival_('value', val);
+                n.ival_('value', new torch._C.IValue(val));
                 type = val.type();
             } else if (Array.isArray(val) && val.every((item) => Number.isInteger(item))) {
-                n.ival_('value', val);
+                const items = val.map((item) => new torch._C.IValue(item, 'Int'));
+                const list = new torch._C.List(torch.IntType.get(), items);
+                n.ival_('value', new torch._C.IValue(list));
                 type = torch.ListType.create(torch.IntType.get());
             } else {
                 throw new python.Error(`Unsupported value type '${typeof val}'.`);
@@ -15515,18 +15531,21 @@ python.Execution = class {
             if (type.isSubtypeOf(torch.TensorType.get())) {
                 return new torch._C.IValue(node.t('value'), 'Tensor');
             } else if (type.isSubtypeOf(torch.BoolType.get())) {
-                return new torch._C.IValue(Boolean(node.i('value'), 'Bool'));
+                return new torch._C.IValue(Boolean(node.i('value')), 'Bool');
             } else if (type.isSubtypeOf(torch.NumberType.get()) && node.kindOf('value') === 'i') {
                 return new torch._C.IValue(node.i('value'), 'Int');
             } else if (type.isSubtypeOf(torch.NumberType.get()) && node.kindOf('value') === 'f') {
                 return new torch._C.IValue(node.f('value'), 'Double');
-            } else if (type.isSubtypeOf(torch.ComplexType.get()) && node.kindOf('value') === 'c') {
+            } else if (type.isSubtypeOf(torch.NumberType.get()) && node.kindOf('value') === 'c') {
                 return new torch._C.IValue(node.c('value'), 'Complex');
             } else if (type instanceof torch.ListType && node.kindOf('value') === 'ival') {
-                let list = node.ival('value');
-                list = list.isList ? list : new torch._C.IValue(list); // remove
+                const list = node.ival('value');
                 torch._C.TORCH_INTERNAL_ASSERT(list.isList());
                 return list;
+            } else if (type instanceof torch.ListType && node.kindOf('value') === 'ss') {
+                const items = node.ss('value').map((s) => new torch._C.IValue(s, 'String'));
+                const list = new torch._C.List(torch.StringType.get(), items);
+                return new torch._C.IValue(list);
             } else if (type instanceof torch.DictType && node.kindOf('value') === 'ival') {
                 const dict = node.ival('value');
                 torch._C.TORCH_INTERNAL_ASSERT(dict.isGenericDict());
@@ -15556,7 +15575,7 @@ python.Execution = class {
                 return enum_val;
             } else if (type instanceof torch.ClassType && !type.is_module()) {
                 const class_val = node.ival('value');
-                return  new torch._C.IValue(class_val, 'Object');
+                return class_val;
             }
             throw new python.Error('Unsupported constant literal.');
         });
@@ -19607,7 +19626,8 @@ python.Execution = class {
             constructor(obj) {
                 super(obj);
                 if (this.type === 'as_tensor') {
-                    this.as_tensor = new torch._export.serde.schema.TensorArgument({ name: this.as_tensor });
+                    const value = typeof this.as_tensor === 'string' ? { name: this.as_tensor } : this.as_tensor;
+                    this.as_tensor = new torch._export.serde.schema.TensorArgument(value);
                 } else if (this.type === 'as_none') {
                     this.as_none = null;
                 } else {
@@ -19796,6 +19816,20 @@ python.Execution = class {
             const artifact = torch.load(serialized);
             return artifact;
         });
+        torch._export.serde.serialize._CURRENT_DESERIALIZER = null;
+        this.registerFunction('torch._export.serde.serialize._reconstruct_fake_tensor', (serialized_tensor_meta, is_parameter) => {
+            const decoder = new TextDecoder('utf-8');
+            const json_tensor_meta = JSON.parse(decoder.decode(serialized_tensor_meta));
+            const tensor_meta = torch._export.serde.serialize._dict_to_dataclass(torch._export.serde.schema.TensorMeta, json_tensor_meta);
+            if (!torch._export.serde.serialize._CURRENT_DESERIALIZER) {
+                throw new python.Error('Need access to current deserializer state.');
+            }
+            let fake_tensor = torch._export.serde.serialize._CURRENT_DESERIALIZER.deserialize_tensor_meta(tensor_meta);
+            if (is_parameter) {
+                fake_tensor = new torch.nn.parameter.Parameter(fake_tensor);
+            }
+            return fake_tensor;
+        });
         this.registerType('torch._export.serde.serialize.GraphModuleDeserializer', class {
             constructor() {
                 this.serialized_name_to_node = new builtins.dict();
@@ -19953,8 +19987,47 @@ python.Execution = class {
                     this.deserialize_outputs(serialized_node, fx_node);
                 } else if (typeof target === 'string') {
                     // Handle unresolved operators
-                    execution.emit('resolve', target);
-                    if (target.match(/^torch\.ops\.(aten|prim|quantized)\./)) {
+                    const arg_type = (arg) => {
+                        switch (arg && arg.type) {
+                            case 'as_tensor': return 'Tensor';
+                            case 'as_tensors': return 'Tensor[]';
+                            case 'as_optional_tensors': return 'Tensor?[]';
+                            case 'as_nested_tensors': return 'Tensor[][]';
+                            case 'as_int': return 'int';
+                            case 'as_ints': return 'int[]';
+                            case 'as_int_lists': return 'int[][]';
+                            case 'as_float': return 'float';
+                            case 'as_floats': return 'float[]';
+                            case 'as_float_lists': return 'float[][]';
+                            case 'as_bool': return 'bool';
+                            case 'as_bools': return 'bool[]';
+                            case 'as_string': return 'str';
+                            case 'as_strings': return 'str[]';
+                            case 'as_sym_int': return 'SymInt';
+                            case 'as_sym_ints': return 'SymInt[]';
+                            case 'as_sym_float': return 'SymFloat';
+                            case 'as_sym_floats': return 'SymFloat[]';
+                            case 'as_sym_bool': return 'SymBool';
+                            case 'as_sym_bools': return 'SymBool[]';
+                            case 'as_scalar_type': return 'ScalarType';
+                            case 'as_memory_format': return 'MemoryFormat';
+                            case 'as_layout': return 'Layout';
+                            case 'as_device': return 'Device';
+                            case 'as_operator': return 'str';
+                            default: return '?';
+                        }
+                    };
+                    const schema = (serialized_node, op) => {
+                        const params = serialized_node.inputs.map((input) => `${arg_type(input.arg)} ${input.name}`).join(', ');
+                        const outputs = serialized_node.outputs.map(arg_type);
+                        const returns = outputs.length === 1 ? outputs[0] : `(${outputs.join(', ')})`;
+                        return `${op}(${params}) -> ${returns}`;
+                    };
+                    const match = target.match(/^torch\.ops\.([^.]+)\.(.+)$/);
+                    const namespace = match ? match[1] : null;
+                    const op = match ? `${match[1]}::${match[2]}` : target;
+                    execution.emit('resolve', schema(serialized_node, op));
+                    if (namespace === 'aten' || namespace === 'prim' || namespace === 'quantized') {
                         throw new python.Error(`Unsupported node target type '${target}'.`);
                     }
                     const [args, kwargs] = this.deserialize_hoo_inputs(serialized_node.inputs);
@@ -20070,59 +20143,67 @@ python.Execution = class {
                     sig.output_specs.map((o) => this.deserialize_output_spec(o)));
             }
             deserialize(serialized_graph_module, serialized_state_dict, constants, example_inputs, symbol_name_to_range) {
-                this.shape_env = new torch.fx.experimental.symbolic_shapes.ShapeEnv(/* assume_static_by_default = True */);
-                this.fake_tensor_mode = new torch._subclasses.fake_tensor.FakeTensorMode(false, true, this.shape_env);
-                this.sympy_functions = new Map([
-                    ['FloorDiv', torch.utils._sympy.functions.FloorDiv],
-                    ['ModularIndexing', torch.utils._sympy.functions.ModularIndexing],
-                    ['Where', torch.utils._sympy.functions.Where],
-                    ['PythonMod', torch.utils._sympy.functions.PythonMod],
-                    ['Mod', torch.utils._sympy.functions.Mod],
-                    ['CleanDiv', torch.utils._sympy.functions.CleanDiv],
-                    ['CeilToInt', torch.utils._sympy.functions.CeilToInt],
-                    ['FloorToInt', torch.utils._sympy.functions.FloorToInt],
-                    ['CeilDiv', torch.utils._sympy.functions.CeilDiv],
-                    ['LShift', torch.utils._sympy.functions.LShift],
-                    ['RShift', torch.utils._sympy.functions.RShift],
-                    ['PowByNatural', torch.utils._sympy.functions.PowByNatural],
-                    ['FloatPow', torch.utils._sympy.functions.FloatPow],
-                    ['FloatTrueDiv', torch.utils._sympy.functions.FloatTrueDiv],
-                    ['IntTrueDiv', torch.utils._sympy.functions.IntTrueDiv],
-                    ['IsNonOverlappingAndDenseIndicator', torch.utils._sympy.functions.IsNonOverlappingAndDenseIndicator],
-                    ['TruncToFloat', torch.utils._sympy.functions.TruncToFloat],
-                    ['TruncToInt', torch.utils._sympy.functions.TruncToInt],
-                    ['RoundToInt', torch.utils._sympy.functions.RoundToInt],
-                    ['RoundDecimal', torch.utils._sympy.functions.RoundDecimal],
-                    ['ToFloat', torch.utils._sympy.functions.ToFloat],
-                    ['Identity', torch.utils._sympy.functions.Identity],
-                ]);
-                this.symbol_name_to_symbol = new Map();
-                this.constants = torch._export.serde.serialize.deserialize_torch_artifact(constants);
-                this.signature = this.deserialize_signature(serialized_graph_module.signature);
-                this.symbol_name_to_range = symbol_name_to_range || new Map();
-                /*
-                    if symbol_name_to_range:
-                    for k, vr in symbol_name_to_range.items():
-                        lower = int(vr.lower)
-                        if vr.upper >= 2:  # max is >= 2, not sym bool range
-                            lower = max(2, lower)
-                        this.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
-                    */
-                this.example_inputs = null;
-                if (example_inputs) {
-                    this.example_inputs = torch._export.serde.serialize.deserialize_torch_artifact(example_inputs);
+                if (torch._export.serde.serialize._CURRENT_DESERIALIZER) {
+                    throw new python.Error('_CURRENT_DESERIALIZER is already set.');
                 }
-                this.deserialize_graph(serialized_graph_module.graph);
-                const module_call_graph = null; // this.deserialize_module_call_graph(serialized_graph_module.module_call_graph)
-                return {
-                    graph_module: torch._export.exported_program._create_graph_module_for_export(this.module, this.graph),
-                    signature: this.signature,
-                    module_call_graph,
-                    names_to_symbols: this.symbol_name_to_symbol,
-                    state_dict: torch._export.serde.serialize.deserialize_torch_artifact(serialized_state_dict),
-                    constants: this.constants,
-                    example_inputs: this.example_inputs,
-                };
+                torch._export.serde.serialize._CURRENT_DESERIALIZER = this;
+                try {
+                    this.shape_env = new torch.fx.experimental.symbolic_shapes.ShapeEnv(/* assume_static_by_default = True */);
+                    this.fake_tensor_mode = new torch._subclasses.fake_tensor.FakeTensorMode(false, true, this.shape_env);
+                    this.sympy_functions = new Map([
+                        ['FloorDiv', torch.utils._sympy.functions.FloorDiv],
+                        ['ModularIndexing', torch.utils._sympy.functions.ModularIndexing],
+                        ['Where', torch.utils._sympy.functions.Where],
+                        ['PythonMod', torch.utils._sympy.functions.PythonMod],
+                        ['Mod', torch.utils._sympy.functions.Mod],
+                        ['CleanDiv', torch.utils._sympy.functions.CleanDiv],
+                        ['CeilToInt', torch.utils._sympy.functions.CeilToInt],
+                        ['FloorToInt', torch.utils._sympy.functions.FloorToInt],
+                        ['CeilDiv', torch.utils._sympy.functions.CeilDiv],
+                        ['LShift', torch.utils._sympy.functions.LShift],
+                        ['RShift', torch.utils._sympy.functions.RShift],
+                        ['PowByNatural', torch.utils._sympy.functions.PowByNatural],
+                        ['FloatPow', torch.utils._sympy.functions.FloatPow],
+                        ['FloatTrueDiv', torch.utils._sympy.functions.FloatTrueDiv],
+                        ['IntTrueDiv', torch.utils._sympy.functions.IntTrueDiv],
+                        ['IsNonOverlappingAndDenseIndicator', torch.utils._sympy.functions.IsNonOverlappingAndDenseIndicator],
+                        ['TruncToFloat', torch.utils._sympy.functions.TruncToFloat],
+                        ['TruncToInt', torch.utils._sympy.functions.TruncToInt],
+                        ['RoundToInt', torch.utils._sympy.functions.RoundToInt],
+                        ['RoundDecimal', torch.utils._sympy.functions.RoundDecimal],
+                        ['ToFloat', torch.utils._sympy.functions.ToFloat],
+                        ['Identity', torch.utils._sympy.functions.Identity],
+                    ]);
+                    this.symbol_name_to_symbol = new Map();
+                    this.constants = torch._export.serde.serialize.deserialize_torch_artifact(constants);
+                    this.signature = this.deserialize_signature(serialized_graph_module.signature);
+                    this.symbol_name_to_range = symbol_name_to_range || new Map();
+                    /*
+                        if symbol_name_to_range:
+                        for k, vr in symbol_name_to_range.items():
+                            lower = int(vr.lower)
+                            if vr.upper >= 2:  # max is >= 2, not sym bool range
+                                lower = max(2, lower)
+                            this.symbol_name_to_range[k] = symbolic_shapes.ValueRanges(_int_to_sympy_int(lower), vr.upper)
+                        */
+                    this.example_inputs = null;
+                    if (example_inputs) {
+                        this.example_inputs = torch._export.serde.serialize.deserialize_torch_artifact(example_inputs);
+                    }
+                    this.deserialize_graph(serialized_graph_module.graph);
+                    const module_call_graph = null; // this.deserialize_module_call_graph(serialized_graph_module.module_call_graph)
+                    return {
+                        graph_module: torch._export.exported_program._create_graph_module_for_export(this.module, this.graph),
+                        signature: this.signature,
+                        module_call_graph,
+                        names_to_symbols: this.symbol_name_to_symbol,
+                        state_dict: torch._export.serde.serialize.deserialize_torch_artifact(serialized_state_dict),
+                        constants: this.constants,
+                        example_inputs: this.example_inputs,
+                    };
+                } finally {
+                    torch._export.serde.serialize._CURRENT_DESERIALIZER = null;
+                }
             }
             sync_fx_node(name, fx_node) {
                 if (this.serialized_name_to_node.has(name)) {

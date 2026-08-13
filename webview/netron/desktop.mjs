@@ -349,7 +349,13 @@ desktop.Host = class {
     async fetch(file, encoding, basename) {
         return new Promise((resolve, reject) => {
             const dirname = path.dirname(url.fileURLToPath(import.meta.url));
-            const pathname = path.join(basename || dirname, file);
+            const root = path.resolve(basename || dirname);
+            const pathname = path.resolve(root, file);
+            const relative = path.relative(root, pathname);
+            if (relative !== '' && (relative.startsWith('..') || path.isAbsolute(relative))) {
+                reject(new Error(`The path '${pathname}' is invalid.`));
+                return;
+            }
             fs.stat(pathname, (err, stat) => {
                 if (err && err.code === 'ENOENT') {
                     reject(new Error(`The file '${file}' does not exist.`));

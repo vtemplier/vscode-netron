@@ -258,6 +258,11 @@ MNN.SparseCommon = class SparseCommon {
     }
 };
 
+MNN.ScaleStorageType = {
+    FP32: 0, '0': 'FP32',
+    FP16: 1, '1': 'FP16'
+};
+
 MNN.IDSTQuan = class IDSTQuan {
 
     static decode(reader, position) {
@@ -276,6 +281,8 @@ MNN.IDSTQuan = class IDSTQuan {
         $.shapeInt32 = reader.bool_(position, 26, false);
         $.weightSize = reader.uint32_(position, 28, 0);
         $.index = reader.array(position, 30, Uint32Array);
+        $.alphaFp16 = reader.array(position, 32, Uint16Array);
+        $.scaleStorage = reader.int8_(position, 34, 0);
         return $;
     }
 
@@ -295,6 +302,8 @@ MNN.IDSTQuan = class IDSTQuan {
         $.shapeInt32 = reader.value(json.shapeInt32, false);
         $.weightSize = reader.value(json.weightSize, 0);
         $.index = reader.array(json.index, Uint32Array);
+        $.alphaFp16 = reader.array(json.alphaFp16, Uint16Array);
+        $.scaleStorage = MNN.ScaleStorageType[json.scaleStorage];
         return $;
     }
 };
@@ -1098,7 +1107,8 @@ MNN.BinaryOpOperation = {
     BITWISE_XOR: 25, '25': 'BITWISE_XOR',
     LOGICALXOR: 26, '26': 'LOGICALXOR',
     LEFTSHIFT: 27, '27': 'LEFTSHIFT',
-    RIGHTSHIFT: 28, '28': 'RIGHTSHIFT'
+    RIGHTSHIFT: 28, '28': 'RIGHTSHIFT',
+    MUL_SILU: 29, '29': 'MUL_SILU'
 };
 
 MNN.BinaryOp = class BinaryOp {
@@ -2622,6 +2632,7 @@ MNN.OpType = {
     SplitGeLU: 303, '303': 'SplitGeLU',
     GroupNorm: 304, '304': 'GroupNorm',
     LinearAttention: 305, '305': 'LinearAttention',
+    RoPE: 306, '306': 'RoPE',
     Extra: 512, '512': 'Extra',
     ConvInt8: 513, '513': 'ConvInt8',
     Int8ToFloat: 514, '514': 'Int8ToFloat',
@@ -2697,6 +2708,9 @@ MNN.AttentionParam = class AttentionParam {
         $.kv_shared_layer = reader.string_(position, 6, null);
         $.layer_index = reader.int32_(position, 8, -1);
         $.kv_shared_layer_index = reader.int32_(position, 10, -1);
+        $.mhq_quant = reader.tables(position, 12, MNN.TensorQuantInfo);
+        $.output_c4 = reader.bool_(position, 14, false);
+        $.attnScale = reader.float32_(position, 16, 0);
         return $;
     }
 
@@ -2706,6 +2720,9 @@ MNN.AttentionParam = class AttentionParam {
         $.kv_shared_layer = reader.value(json.kv_shared_layer, null);
         $.layer_index = reader.value(json.layer_index, -1);
         $.kv_shared_layer_index = reader.value(json.kv_shared_layer_index, -1);
+        $.mhq_quant = reader.objects(json.mhq_quant, MNN.TensorQuantInfo);
+        $.output_c4 = reader.value(json.output_c4, false);
+        $.attnScale = reader.value(json.attnScale, 0);
         return $;
     }
 };
@@ -2731,6 +2748,31 @@ MNN.LinearAttentionParam = class LinearAttentionParam {
         $.head_k_dim = reader.value(json.head_k_dim, 0);
         $.head_v_dim = reader.value(json.head_v_dim, 0);
         $.use_qk_l2norm = reader.value(json.use_qk_l2norm, false);
+        return $;
+    }
+};
+
+MNN.RoPEParam = class RoPEParam {
+
+    static decode(reader, position) {
+        const $ = new MNN.RoPEParam();
+        $.rope_cut_head_dim = reader.int32_(position, 4, 0);
+        $.num_head = reader.int32_(position, 6, 0);
+        $.kv_num_head = reader.int32_(position, 8, 0);
+        $.head_dim = reader.int32_(position, 10, 0);
+        $.q_norm = reader.table(position, 12, MNN.LayerNorm);
+        $.k_norm = reader.table(position, 14, MNN.LayerNorm);
+        return $;
+    }
+
+    static decodeText(reader, json) {
+        const $ = new MNN.RoPEParam();
+        $.rope_cut_head_dim = reader.value(json.rope_cut_head_dim, 0);
+        $.num_head = reader.value(json.num_head, 0);
+        $.kv_num_head = reader.value(json.kv_num_head, 0);
+        $.head_dim = reader.value(json.head_dim, 0);
+        $.q_norm = reader.object(json.q_norm, MNN.LayerNorm);
+        $.k_norm = reader.object(json.k_norm, MNN.LayerNorm);
         return $;
     }
 };
@@ -3010,6 +3052,7 @@ MNN.OpParameter = class {
             case 99: return MNN.StftParam.decode(reader, position);
             case 100: return MNN.LinearAttentionParam.decode(reader, position);
             case 101: return MNN.ShapeParam.decode(reader, position);
+            case 102: return MNN.RoPEParam.decode(reader, position);
             default: return undefined;
         }
     }
@@ -3117,6 +3160,7 @@ MNN.OpParameter = class {
             case 'StftParam': return MNN.StftParam.decodeText(reader, json);
             case 'LinearAttentionParam': return MNN.LinearAttentionParam.decodeText(reader, json);
             case 'ShapeParam': return MNN.ShapeParam.decodeText(reader, json);
+            case 'RoPEParam': return MNN.RoPEParam.decodeText(reader, json);
             default: return undefined;
         }
     }
